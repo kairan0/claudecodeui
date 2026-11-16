@@ -247,3 +247,27 @@ test('initial history fill remains bounded when many turns have no visible items
   assert.equal(page.hasMore, true);
   assert.ok(page.nextCursor);
 });
+
+test('cursor history preserves individual item times after steering within a long turn', async () => {
+  const provider = new CodexSessionsProvider({
+    readRuntimeMode: () => 'app-server',
+    appServer: {
+      async readThread() { throw new Error('must not hydrate'); },
+      async listTurns() { return { data: [{ id: 'long-turn', startedAt: 1700000000 }], nextCursor: null }; },
+      async listItems() { return { data: [
+        { startedAtMs: 1700000900123, completedAtMs: 1700000900456,
+          item: { type: 'agentMessage', id: 'final-answer', text: 'Final answer after steering' } },
+        { startedAtMs: 1700000800123, completedAtMs: 1700000800123,
+          item: { type: 'userMessage', id: 'steer', content: [{ type: 'text', text: 'Change direction' }] } },
+      ], nextCursor: null }; },
+    },
+  });
+  const page = await provider.fetchHistory('app', { providerSessionId: 'native', cursor: '', limit: 2 });
+  assert.deepEqual(page.messages.map(m => m.timestamp), [
+    new Date(1700000800123).toISOString(), new Date(1700000900123).toISOString(),
+  ]);
+  // A previous live tool must stay before the persisted final answer on refresh.
+  const merged = [...page.messages, { id: 'live-tool', timestamp: new Date(1700000850000).toISOString() }]
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
+  assert.equal(merged.at(-1)?.id, 'final-answer');
+});

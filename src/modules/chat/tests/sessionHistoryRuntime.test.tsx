@@ -193,3 +193,21 @@ test('native cursor pages ignore page-local totals and use the opaque continuati
   assert.equal(result.current.getSessionSlot('same-session')?.serverMessages.length, 4);
   assert.equal(result.current.getSessionSlot('same-session')?.hasMore, false);
 });
+
+test('refresh after a new prompt keeps the previous final answer after older live tool rows', async () => {
+  vi.mocked(readUserPreference).mockReturnValue({ runtimeMode: 'app-server' });
+  const base = historyMessages('app-server', 1)[0];
+  const answer = { ...base, id: 'answer', content: 'Previous final answer', timestamp: new Date(1700000900123).toISOString() };
+  const prompt = { ...base, id: 'new-prompt', role: 'user' as const, content: 'Next task', timestamp: new Date(1700001000000).toISOString() };
+  sessionMessages.mockResolvedValue({ ok: true, json: async () => ({ data: {
+    messages: [answer, prompt], nextCursor: 'older', totalKnown: false, hasMore: true,
+  } }) });
+  const { result } = renderHook(() => useSessionStore());
+  act(() => {
+    result.current.appendRealtime('same-session', { ...base, id: 'tool', kind: 'tool_use', toolId: 'tool', toolName: 'Bash', timestamp: new Date(1700000850000).toISOString() });
+    result.current.appendRealtime('same-session', answer);
+    result.current.appendRealtime('same-session', prompt);
+  });
+  await act(async () => { await result.current.refreshLatestFromServer('same-session', { limit: 20 }); });
+  assert.deepEqual(result.current.getMessages('same-session').map(m => m.id), ['tool', 'answer', 'new-prompt']);
+});

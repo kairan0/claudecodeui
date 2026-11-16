@@ -1,3 +1,17 @@
+## Manager answer ordering after steering
+
+Native paginated history contains per-item startedAtMs/completedAtMs. The adapter
+previously discarded these and assigned every item the turn start time. On refresh,
+the frontend interleaves persisted and still-live rows by timestamp; a final answer
+could consequently jump before earlier live tool records and out of the visible
+window. Preserve item start time (completion fallback), with turn time only when
+item timestamps are unavailable. Manager native history retained the prior final
+answer; this is an ordering repair, not a resend or transcript mutation.
+
+Regression: timestamp/order test failed before repair; 90 backend tests and 10
+frontend history tests pass. Typecheck, server build and lint pass. Visual user
+verification remains outstanding after deployment.
+
 ## Claude plan approval and custom API side questions
 
 Approving ExitPlanMode now returns an SDK session-mode update restoring the

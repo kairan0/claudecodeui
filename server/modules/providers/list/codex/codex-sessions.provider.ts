@@ -2600,7 +2600,16 @@ export class CodexSessionsProvider implements IProviderSessions {
         thread = { turns: [{ ...turn, itemsView: 'full',
           // A failed-turn marker belongs only to the newest item page.
           status: position.itemCursor ? 'completed' : turn.status,
-          items: [...items.data].reverse().map(entry => readObjectRecord(entry)?.item),
+          items: [...items.data].reverse().map(entry => {
+            const record = readObjectRecord(entry);
+            const item = readObjectRecord(record?.item);
+            if (!item) return null;
+            // Native item timestamps must survive pagination. Turn-start time
+            // would move a persisted final answer before still-live tool rows.
+            const ms = record?.startedAtMs ?? record?.completedAtMs;
+            const date = typeof ms === 'number' ? new Date(ms) : null;
+            return { ...item, historyTimestamp: date && Number.isFinite(date.getTime()) ? date.toISOString() : undefined };
+          }),
         }] };
       } else thread = { turns: [] };
       response = { nextCursor };
@@ -2627,7 +2636,7 @@ export class CodexSessionsProvider implements IProviderSessions {
           continue;
         }
         const transformed = transformCodexAppServerItem(item);
-        transformed.timestamp = timestamp;
+        transformed.timestamp = typeof item.historyTimestamp === 'string' ? item.historyTimestamp : timestamp;
         if (!hasUserMessage && transformed.itemType === 'user_message') {
           transformed.turnId = readNonEmptyString(turn.id);
           hasUserMessage = true;
