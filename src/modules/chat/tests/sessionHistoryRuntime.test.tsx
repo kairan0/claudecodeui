@@ -56,7 +56,7 @@ test('history requests use the current Codex preference on every page', async ()
     });
     assert.deepEqual(sessionMessages.mock.lastCall?.slice(0, 2), [
       `session-${runtimeMode}`,
-      { limit: 20, offset: 0, codexRuntimeMode: runtimeMode ?? 'app-server' },
+      { limit: 20, offset: 0, codexRuntimeMode: runtimeMode ?? 'app-server', ...(runtimeMode === 'sdk' ? {} : { cursor: '' }) },
     ]);
     assert.equal(vi.mocked(readUserPreference).mock.lastCall?.[0], 'codexPermissions');
   }
@@ -175,4 +175,21 @@ test('a failed outdated read does not leave the slot stuck loading', async () =>
   });
   assert.equal(result.current.getSessionSlot('same-session')?.status, 'idle');
   assert.equal(result.current.isStale('same-session'), true);
+});
+
+
+test('native cursor pages ignore page-local totals and use the opaque continuation', async () => {
+  vi.mocked(readUserPreference).mockReturnValue({ runtimeMode: 'app-server' });
+  const messages = historyMessages('app-server', 4);
+  sessionMessages.mockImplementation(async (_id, options) => ({ ok: true, json: async () => ({ data: {
+    messages: options.cursor === 'older' ? messages.slice(0, 2) : messages.slice(2),
+    total: 2, totalKnown: false, hasMore: options.cursor !== 'older',
+    nextCursor: options.cursor === 'older' ? null : 'older',
+  } }) }));
+  const { result } = renderHook(() => useSessionStore());
+  await act(async () => { await result.current.fetchFromServer('same-session', { limit: 2 }); });
+  await act(async () => { await result.current.fetchMore('same-session', { limit: 2 }); });
+  assert.equal(sessionMessages.mock.lastCall?.[1].cursor, 'older');
+  assert.equal(result.current.getSessionSlot('same-session')?.serverMessages.length, 4);
+  assert.equal(result.current.getSessionSlot('same-session')?.hasMore, false);
 });

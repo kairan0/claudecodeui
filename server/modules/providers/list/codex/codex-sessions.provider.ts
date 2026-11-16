@@ -61,7 +61,7 @@ type CodexHistoryResult = {
 };
 
 type CodexSessionsProviderOptions = {
-  appServer?: Pick<CodexAppServerRuntime, 'readThread'>;
+  appServer?: Pick<CodexAppServerRuntime, 'readThread'> & Partial<Pick<CodexAppServerRuntime, 'listTurns' | 'listItems'>>;
   readRuntimeMode?: () => CodexRuntimeMode;
 };
 
@@ -1877,7 +1877,7 @@ async function attachCodexSubagentTranscripts(
 }
 
 export class CodexSessionsProvider implements IProviderSessions {
-  private readonly appServer: Pick<CodexAppServerRuntime, 'readThread'>;
+  private readonly appServer: Pick<CodexAppServerRuntime, 'readThread'> & Partial<Pick<CodexAppServerRuntime, 'listTurns' | 'listItems'>>;
   private readonly readRuntimeMode: () => CodexRuntimeMode;
 
   constructor(options: CodexSessionsProviderOptions = {}) {
@@ -2444,9 +2444,53 @@ export class CodexSessionsProvider implements IProviderSessions {
     providerSessionId: string,
     limit: number | null,
     offset: number,
+    cursor?: string,
   ): Promise<FetchHistoryResult> {
-    const response = readObjectRecord(await this.appServer.readThread(providerSessionId, true));
-    const thread = readObjectRecord(response?.thread);
+    const paged = cursor !== undefined;
+    let response: AnyRecord | null;
+    let thread: AnyRecord | null;
+    if (paged) {
+      if (!this.appServer.listTurns || !this.appServer.listItems) throw new Error('Codex pagination is unavailable');
+      let position: AnyRecord = {};
+      if (cursor) {
+        try {
+          position = JSON.parse(Buffer.from(cursor, 'base64url').toString('utf8'));
+          if (!position || position.threadId !== providerSessionId
+            || (position.turnCursor !== undefined && typeof position.turnCursor !== 'string')
+            || (position.itemCursor !== undefined && (typeof position.itemCursor !== 'string' || typeof position.turnId !== 'string'))
+            || (position.nextTurnCursor !== undefined && typeof position.nextTurnCursor !== 'string')) throw new Error();
+        } catch { throw new Error('History cursor no longer matches this thread; reload history'); }
+      }
+      const turns = position.itemCursor
+        ? { data: [{ id: position.turnId, startedAt: typeof position.startedAt === 'number' ? position.startedAt : undefined }], nextCursor: position.nextTurnCursor }
+        : readObjectRecord(await this.appServer.listTurns({ threadId: providerSessionId,
+        limit: 1, sortDirection: 'desc', itemsView: 'summary',
+        ...(position.turnCursor ? { cursor: position.turnCursor } : {}) }));
+      if (!Array.isArray(turns?.data)) throw new Error('Invalid turn page');
+      const turn = readObjectRecord(turns.data[0]);
+      let nextCursor: string | null = null;
+      if (turn) {
+        const items = readObjectRecord(await this.appServer.listItems({ threadId: providerSessionId,
+          turnId: turn.id, limit: Math.min(100, Math.max(1, limit ?? 50)), sortDirection: 'desc',
+          ...(position.itemCursor ? { cursor: position.itemCursor } : {}) }));
+        if (!Array.isArray(items?.data)) throw new Error('Invalid item page');
+        const next = typeof items.nextCursor === 'string'
+          ? { threadId: providerSessionId, turnId: turn.id, startedAt: turn.startedAt,
+              nextTurnCursor: turns.nextCursor ?? undefined, itemCursor: items.nextCursor }
+          : typeof turns.nextCursor === 'string'
+            ? { threadId: providerSessionId, turnCursor: turns.nextCursor } : null;
+        nextCursor = next ? Buffer.from(JSON.stringify(next)).toString('base64url') : null;
+        thread = { turns: [{ ...turn, itemsView: 'full',
+          // A failed-turn marker belongs only to the newest item page.
+          status: position.itemCursor ? 'completed' : turn.status,
+          items: [...items.data].reverse().map(entry => readObjectRecord(entry)?.item),
+        }] };
+      } else thread = { turns: [] };
+      response = { nextCursor };
+    } else {
+      response = readObjectRecord(await this.appServer.readThread(providerSessionId, true));
+      thread = readObjectRecord(response?.thread);
+    }
     if (!thread || !Array.isArray(thread.turns)) {
       throw new Error('thread/read did not return a thread with turns');
     }
@@ -2485,7 +2529,9 @@ export class CodexSessionsProvider implements IProviderSessions {
       }
     }
 
-    return this.paginateHistory(normalized, limit, offset);
+    const result = this.paginateHistory(normalized, paged ? null : limit, paged ? 0 : offset);
+    return paged ? { ...result, limit, nextCursor: typeof response?.nextCursor === 'string' ? response.nextCursor : null,
+      totalKnown: false, hasMore: typeof response?.nextCursor === 'string' } : result;
   }
 
   private async fetchJsonlHistory(
@@ -2527,6 +2573,7 @@ export class CodexSessionsProvider implements IProviderSessions {
         options.providerSessionId,
         limit,
         offset,
+        options.cursor,
       );
     }
 

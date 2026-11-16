@@ -764,6 +764,22 @@ export class CodexAppServerRuntime {
     });
   }
 
+  /** Reads a bounded page of turns for the provider history adapter. */
+  async listTurns(params: AnyRecord): Promise<unknown> {
+    return this.withAppServerOperation(async () => {
+      await this.manager.start();
+      return this.manager.request('thread/turns/list', params);
+    });
+  }
+
+  /** Reads bounded items, including within exceptionally large turns. */
+  async listItems(params: AnyRecord): Promise<unknown> {
+    return this.withAppServerOperation(async () => {
+      await this.manager.start();
+      return this.manager.request('thread/items/list', params);
+    });
+  }
+
   /** Lists one page of persisted provider threads through the owned process. */
   async listThreads(params: AnyRecord = {}): Promise<unknown> {
     return this.withAppServerOperation(async () => {

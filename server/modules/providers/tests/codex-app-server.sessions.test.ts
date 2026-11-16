@@ -181,3 +181,32 @@ test('app-server history rejects incomplete turns without a JSONL fallback', asy
     /incomplete turn item view/,
   );
 });
+
+
+test('cursor history bounds items within a turn without full hydration', async () => {
+  const calls: unknown[] = [];
+  const provider = new CodexSessionsProvider({
+    readRuntimeMode: () => 'app-server',
+    appServer: {
+      async readThread() { throw new Error('must not hydrate'); },
+      async listTurns(params) { calls.push(params); return { data: [{ id: 'turn' }], nextCursor: 'older-turn' }; },
+      async listItems(params) { calls.push(params); return { data: [
+        { item: { type: 'agentMessage', id: 'a2', text: 'new' } },
+        { item: { type: 'agentMessage', id: 'a1', text: 'old' } },
+      ], nextCursor: 'older-item' }; },
+    },
+  });
+  const page = await provider.fetchHistory('app', { providerSessionId: 'native', cursor: '', limit: 2 });
+  assert.deepEqual(calls, [
+    { threadId: 'native', limit: 1, sortDirection: 'desc', itemsView: 'summary' },
+    { threadId: 'native', turnId: 'turn', limit: 2, sortDirection: 'desc' },
+  ]);
+  assert.equal(page.totalKnown, false);
+  assert.deepEqual(page.messages.map(m => m.content), ['old', 'new']);
+  assert.deepEqual(JSON.parse(Buffer.from(page.nextCursor!, 'base64url').toString()),
+    { threadId: 'native', turnId: 'turn', nextTurnCursor: 'older-turn', itemCursor: 'older-item' });
+  calls.length = 0;
+  await provider.fetchHistory('app', { providerSessionId: 'native', cursor: page.nextCursor!, limit: 2 });
+  assert.deepEqual(calls, [{ threadId: 'native', turnId: 'turn', cursor: 'older-item', limit: 2, sortDirection: 'desc' }]);
+  await assert.rejects(provider.fetchHistory('app', { providerSessionId: 'other', cursor: page.nextCursor! }), /cursor/);
+});

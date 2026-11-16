@@ -672,6 +672,8 @@ export type ProviderRunFunction = (
  * uses the same source as chat; omission preserves the server default.
  */
 export type FetchHistoryOptions = {
+  /** Opaque native history cursor; empty string requests the latest page. */
+  cursor?: string;
   projectPath?: string;
   limit?: number | null;
   offset?: number;
@@ -685,6 +687,9 @@ export type FetchHistoryOptions = {
  * Use this as the contract for APIs that return paginated conversation history.
  */
 export type FetchHistoryResult = {
+  /** Present only for cursor pagination. total is page-local when totalKnown is false. */
+  nextCursor?: string | null;
+  totalKnown?: boolean;
   messages: NormalizedMessage[];
   total: number;
   hasMore: boolean;

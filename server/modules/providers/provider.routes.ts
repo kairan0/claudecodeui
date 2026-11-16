@@ -970,7 +970,12 @@ router.get(
       });
     }
 
+    const cursor = req.query.cursor ?? (req.query.pagination === 'cursor' ? '' : undefined);
+    if (cursor !== undefined && (typeof cursor !== 'string' || cursor.length > 16384)) {
+      throw new AppError('Invalid history cursor.', { code: 'INVALID_QUERY_PARAMETER', statusCode: 400 });
+    }
     const result = await sessionsService.fetchHistory(sessionId, {
+      cursor,
       limit,
       offset,
       codexRuntimeMode,

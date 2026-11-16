@@ -484,7 +484,7 @@ export const sessionsService = {
 
   async fetchHistory(
     sessionId: string,
-    options: Pick<FetchHistoryOptions, 'limit' | 'offset' | 'codexRuntimeMode'> = {},
+    options: Pick<FetchHistoryOptions, 'limit' | 'offset' | 'codexRuntimeMode' | 'cursor'> = {},
   ): Promise<FetchHistoryResult> {
     const session = sessionsDb.getSessionById(sessionId);
     if (!session) {
@@ -552,6 +552,7 @@ export const sessionsService = {
       result = await providerSessions.fetchHistory(sessionId, {
         limit: requestedLimit,
         offset: requestedOffset,
+        cursor: options.cursor,
         projectPath,
         providerSessionId,
         ...(codexRuntimeMode ? { codexRuntimeMode } : {}),

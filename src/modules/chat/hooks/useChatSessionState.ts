@@ -1053,6 +1053,17 @@ export function useChatSessionState({
         ),
       });
 
+      // Native history stays bounded per request even for the explicit Load all action.
+      while (slot?.nextCursor !== undefined && slot.hasMore) {
+        if (!isActiveRef.current || activeSessionIdRef.current !== requestSessionId) return;
+        const cursor = slot.nextCursor;
+        await sessionStore.fetchMore(requestSessionId, {
+          limit: 100,
+          canRequest: () => isActiveRef.current && activeSessionIdRef.current === requestSessionId,
+        });
+        if (!isActiveRef.current || activeSessionIdRef.current !== requestSessionId) return;
+        if (slot.hasMore && slot.nextCursor === cursor) throw new Error('History pagination made no progress');
+      }
       if (currentSessionId !== requestSessionId) return;
 
       if (slot) {

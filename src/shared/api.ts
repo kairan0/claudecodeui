@@ -162,6 +162,7 @@ const del = withBody('DELETE');
 // `EventSource` and `XMLHttpRequest` need a bare URL.
 
 type SessionHistoryQuery = {
+  cursor?: string;
   limit?: number | null;
   offset?: number;
   codexRuntimeMode?: CodexRuntimeMode;
@@ -174,12 +175,13 @@ type SessionHistoryQuery = {
  */
 export const sessionMessagesUrl = (
   sessionId: string,
-  { limit = null, offset = 0, codexRuntimeMode }: SessionHistoryQuery = {},
+  { limit = null, offset = 0, codexRuntimeMode, cursor }: SessionHistoryQuery = {},
 ): string => {
   const base = `/api/providers/sessions/${encodeURIComponent(sessionId)}/messages`;
   return `${base}${query({
     ...(limit === null || limit === undefined ? {} : { limit, offset: offset ?? 0 }),
     codexRuntimeMode,
+    ...(cursor !== undefined ? { pagination: 'cursor', cursor } : {}),
   })}`;
 };
 
