@@ -618,7 +618,7 @@ export class CodexAppServerRuntime {
         }));
         return { status: 'interrupted' };
       }
-      if (run?.turnAccepted) {
+      if (run && (run.turnAccepted || run.terminal)) {
         this.failRun(run, error instanceof Error ? error.message : String(error));
         return await run.completion;
       }

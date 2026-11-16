@@ -97,6 +97,14 @@ export class JsonRpcRemoteError extends Error {
   }
 }
 
+/** Process supervision distinguishes uncertain delivery from an ordinary RPC rejection. */
+export class JsonRpcRequestTimeoutError extends Error {
+  constructor(method: string, timeoutMs: number) {
+    super(`JSON-RPC request ${method} timed out after ${timeoutMs} ms`);
+    this.name = 'JsonRpcRequestTimeoutError';
+  }
+}
+
 export class JsonRpcTransportClosedError extends Error {
   constructor(message = 'JSON-RPC transport is closed') {
     super(message);
@@ -225,7 +233,7 @@ export class CodexAppServerTransport {
       const timer = setTimeout(() => {
         const pending = this.pending.get(id);
         this.pending.delete(id);
-        pending?.reject(new Error(`JSON-RPC request ${method} timed out after ${timeoutMs} ms`));
+        pending?.reject(new JsonRpcRequestTimeoutError(method, timeoutMs));
       }, timeoutMs);
       this.pending.set(id, {
         resolve: (value) => {

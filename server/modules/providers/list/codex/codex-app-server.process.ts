@@ -10,7 +10,7 @@ import type {
   JsonRpcNotification,
   JsonRpcRequest,
 } from './codex-app-server.transport.js';
-import { CodexAppServerTransport, JsonRpcTransportClosedError } from './codex-app-server.transport.js';
+import { CodexAppServerTransport, JsonRpcRequestTimeoutError, JsonRpcTransportClosedError } from './codex-app-server.transport.js';
 
 export type CodexAppServerClientInfo = {
   name: string;
@@ -101,6 +101,7 @@ export type CodexAppServerProcessManagerOptions = {
   capabilities?: Record<string, unknown>;
   shutdownGracePeriodMs?: number;
   handshakeTimeoutMs?: number;
+  requestTimeoutMs?: number;
   spawn?: CodexAppServerSpawn;
   onNotification?: (notification: JsonRpcNotification) => void;
   onRequest?: (request: JsonRpcRequest) => unknown | Promise<unknown>;
@@ -173,6 +174,7 @@ export class CodexAppServerProcessManager {
   private readonly capabilities?: Record<string, unknown>;
   private readonly shutdownGracePeriodMs: number;
   private readonly handshakeTimeoutMs: number;
+  private readonly requestTimeoutMs?: number;
   private readonly spawnProcess: CodexAppServerSpawn;
   private readonly callbacks: Pick<
     CodexAppServerProcessManagerOptions,
@@ -194,6 +196,14 @@ export class CodexAppServerProcessManager {
   constructor(options: CodexAppServerProcessManagerOptions = {}) {
     this.executable = options.executable ?? DEFAULT_EXECUTABLE;
     this.args = [...(options.args ?? DEFAULT_ARGS)];
+    const launchEnv = options.env ?? process.env;
+    if (launchEnv.CLOUDCLI_CODEX_PYTHON) {
+      if (!launchEnv.CLOUDCLI_CODEX_BRIDGE_SCRIPT) {
+        throw new Error('CLOUDCLI_CODEX_BRIDGE_SCRIPT is required with CLOUDCLI_CODEX_PYTHON');
+      }
+      this.args = [launchEnv.CLOUDCLI_CODEX_BRIDGE_SCRIPT, this.executable, ...this.args];
+      this.executable = launchEnv.CLOUDCLI_CODEX_PYTHON;
+    }
     this.cwd = options.cwd;
     this.env = options.env;
     this.clientInfo = {
@@ -203,9 +213,10 @@ export class CodexAppServerProcessManager {
     };
     this.capabilities = options.capabilities;
     this.handshakeTimeoutMs = options.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS;
+    this.requestTimeoutMs = options.requestTimeoutMs;
     this.shutdownGracePeriodMs = Math.max(
       0,
-      options.shutdownGracePeriodMs ?? DEFAULT_SHUTDOWN_GRACE_PERIOD_MS,
+      options.shutdownGracePeriodMs ?? (launchEnv.CLOUDCLI_CODEX_PYTHON ? 5_000 : DEFAULT_SHUTDOWN_GRACE_PERIOD_MS),
     );
     this.spawnProcess = options.spawn ?? defaultSpawn;
     this.callbacks = options;
@@ -256,7 +267,17 @@ export class CodexAppServerProcessManager {
     if (this.state !== 'ready' || !this.transport) {
       return Promise.reject(new Error('Codex app-server is not ready'));
     }
-    return this.transport.request<TResult>(method, params);
+    const transport = this.transport;
+    return transport.request<TResult>(method, params, { timeoutMs: this.requestTimeoutMs }).catch((error: unknown) => {
+      // A lost reply may hide an accepted turn. Stop this engine before callers
+      // can start another turn; never retry a write with an uncertain outcome.
+      if (error instanceof JsonRpcRequestTimeoutError
+        && this.transport === transport && !this.expectedExit) {
+        this.handleProcessError(error);
+        void this.stop();
+      }
+      throw error;
+    });
   }
 
   /** Sends a notification only after initialize/initialized has completed. */
@@ -390,7 +411,8 @@ export class CodexAppServerProcessManager {
       onDiagnostic: (diagnostic) => this.emitDiagnostic(diagnostic),
       onClose: (error) => {
         if (!this.expectedExit && this.state === 'ready') {
-          this.fail(error);
+          this.handleProcessError(error);
+          void this.stop();
         }
       },
     });

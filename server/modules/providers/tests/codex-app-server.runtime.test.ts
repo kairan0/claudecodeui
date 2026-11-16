@@ -224,14 +224,46 @@ const context: ProviderRuntimeContext = {
   isProviderInstalled: async () => true,
 };
 
-function createRuntime(process: FakeAppServerProcess) {
+function createRuntime(process: FakeAppServerProcess, requestTimeoutMs?: number) {
   return createCodexAppServerRuntime({
     managerOptions: {
       clientInfo: { name: 'cloudcli-runtime-test', version: 'test' },
       spawn: () => process as unknown as CodexAppServerProcess,
+      requestTimeoutMs,
+      shutdownGracePeriodMs: 10,
     },
   });
 }
+
+test('stdout EOF settles an accepted turn even while the child remains alive', { timeout: 2_000 }, async (t) => {
+  const harness = createHarness();
+  const runtime = createRuntime(harness.process);
+  t.after(() => harness.process.kill());
+  const writer = createWriter();
+  const running = runtime.run('Work', { sessionId: 'app-eof' }, writer.writer, context);
+  while ((await harness.nextRequest()).method !== 'turn/start') { /* wait for the turn */ }
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  harness.process.stdout.end();
+  assert.equal((await running as { status: string }).status, 'failed');
+  assert.equal(runtime.activeTurnToken('app-eof'), null);
+  assert.equal(writer.messages.filter((message) => message.kind === 'complete').length, 1);
+});
+
+test('lost turn/start response stops the uncertain engine and emits one terminal result', { timeout: 2_000 }, async (t) => {
+  const harness = createHarness({ pauseAt: 'turn/start' });
+  const runtime = createRuntime(harness.process, 30);
+  t.after(() => harness.process.kill());
+  const writer = createWriter();
+  const running = runtime.run('Work', { sessionId: 'app-timeout' }, writer.writer, context);
+  while ((await harness.nextRequest()).method !== 'turn/start') { /* wait for the turn */ }
+  harness.notify('turn/started', { threadId: 'thread-new', turn: { id: 'accepted-without-reply' } });
+  assert.equal((await running as { status: string }).status, 'failed');
+  assert.equal(runtime.activeTurnToken('app-timeout'), null);
+  assert.equal(writer.messages.filter((message) => message.kind === 'complete').length, 1);
+  const exited = new Promise<void>((resolve) => harness.process.once('exit', () => resolve()));
+  await exited;
+  assert.equal(harness.requests.filter((request) => request.method === 'turn/start').length, 0);
+});
 
 test('uses the owned app-server process for thread list, read, and name requests', async () => {
   const harness = createHarness();

@@ -2,7 +2,7 @@
 
 2026-11-16 的复核结论：有可复用的官方客户端，不应继续把 PR #1526 的自写 TypeScript transport/runtime 当成唯一维护路线。优先验证“官方客户端作为依赖 + CloudCLI 界面适配”；只有官方接口覆盖不到的应用行为才自行实现。
 
-本次完成的是源码核对和可重复的兼容性验证，尚未把 CloudCLI 的正式运行路径切换到 Python，也未完成网页审批桥接。
+本地分支 `local/official-client-reuse` 已接入官方 Python 客户端：隔离启动脚本默认启用桥接，原 3011 服务不变。基本审批转接、同轮 steer、原生历史读取和异常退出已通过自动测试；尚未完成真实网页与 Android 人工验收。
 
 ## 核对到的官方实现
 
@@ -27,9 +27,13 @@
 1. 获取并检查上述官方固定提交，直接加载未修改的 SDK 源码。
 2. 在忽略的 `local-state/` 内创建独立 Python 环境，使用固定测试依赖。
 3. 运行官方原有的 87 项测试，覆盖 steer、interrupt、流式事件、回执前事件、异步取消、请求路由。
-4. 增加一个 CloudCLI 特有的回归场景：子进程 stdout 关闭、进程仍存活时，等待中的 turn stream 是否立即抛出 `TransportClosedError`。
+4. 验证子进程 stdout 关闭、进程仍存活时，等待中的 turn stream 立即抛出 `TransportClosedError`。
+5. 通过独立进程验证审批不会自动通过，也不会阻塞其他控制请求；stdin EOF、SIGTERM、原生 stdout EOF 均清理子进程。
+6. 验证原生输入管道阻塞、忽略 SIGTERM 以及 BrokenPipe 时的强制退出和子进程回收。
+7. 通过 CloudCLI 的实际 TypeScript runtime → Python bridge → 官方二进制完成同轮 steer，断言只有一个 `turn/start`、一个 `turn/steer`、一个终态，最终答复为 `after steer`。
+8. 验证新桥接进程读取原生历史；另一个客户端顺序续写后，保留的只读连接能重新读取新增内容。
 
-测试使用真正的 Codex 0.166.0 二进制连接本地模拟模型服务，或官方单元测试中的模拟对象。测试 fixture 使用空的临时 home，不读取、复制或继续用户 `~/.codex` 中的登录和会话；这不是另一套实际账号 profile。没有真实云端模型请求。实测 **88 项全部通过，耗时约 4 秒**，包括上述 EOF 场景。它证明官方客户端能够处理这个原 PR 的特定故障，尚不代表 CloudCLI 已经接入修复。
+测试使用真正的 Codex 0.166.0 二进制连接本地模拟模型服务，或官方单元测试中的模拟对象。测试 fixture 使用空的临时 home，不读取、复制或继续用户 `~/.codex` 中的登录和会话；这不是另一套实际账号 profile。验证脚本没有真实云端模型请求。实测 **95 项全部通过，耗时约 17 秒**。此外，CloudCLI 后端 754 项测试中 753 通过、1 跳过；新增的两项运行时回归覆盖断流和丢失 turn/start ACK。
 
 执行：
 
@@ -39,20 +43,26 @@ bash scripts/check-official-codex-client.sh
 
 需要 git、uv 和 fork 已安装的 Codex 依赖。验证环境首次安装需要网络，测试模型服务仅监听本机。脚本不启动 CloudCLI Web 服务、不写其数据库和服务发现文件。
 
-## 为什么不能无条件整包替换
+## 具体复用与保留的边界
 
 官方代码减少维护量，但仍需检查它和产品需求的差异：
 
-- 该版本 `CodexClient._default_approval_handler` 默认接受命令/文件审批。正式桥接必须显式接入 CloudCLI 的审批响应；未收到确认时不能使用这个默认值。高层 `Codex` 构造器没有公开的 approval handler 参数，可能需要使用低层客户端并固定版本。
-- Python SDK 的请求等待没有通用超时。它会在 EOF 时唤醒等待者，但如果服务保持连接却永远不返回，仍需外层监督。取消等待也不等于中断模型执行；不能把此前 turn/start 回执超时问题直接标成“已修复”。
+- 官方 SDK 负责原生进程启动、原生消息读写及 RPC 响应关联。桥接原样转交通知和服务器请求，由 CloudCLI 的既有 runtime 处理会话、turn 状态、消息归一化和审批。因此，本次没有替换 CloudCLI 整个 runtime，也仍保留 Node/Python IPC transport。
+- 该版本默认审批 handler 会接受命令/文件审批，且同步 handler 会占用唯一 reader。桥接绕过此路径，转交原始 request ID 等待 CloudCLI 答复；兜底 handler 明确拒绝。测试覆盖此行为，真实网页审批仍待验收。
+- Python SDK 的请求等待没有通用超时。Node 继续负责 RPC 超时监督，超时和传输关闭均使运行中的任务失败并关闭该 app-server，不自动重试未知投递。**此策略会结束该进程承载的其他会话任务**，属于保守的故障隔离边界；不是自动恢复执行。
+- SDK 的 buffered stdin 关闭可能被写入阻塞。桥接增加独立退出 watchdog，必要时先 terminate/kill 原生进程再回收；非远端 RPC 错误按致命传输故障退出，避免其他任务永久 busy。
 - CLI 自己在部分 steer 竞争情况下会使用服务器给出的新 turn ID 重试；CloudCLI 中用户选择某轮次的队列条目时，不应无条件照搬这一策略。
-- Python 辅助进程增加部署依赖。它省去了手写 JSON-RPC、事件分发和部分生命周期代码，但需要一层 Node/Python 调用、事件及审批转接，并验证进程退出和取消语义。
+- Python 辅助进程增加部署依赖。桥接使用 `_read_message`、`_request_raw`、`_write_message` 和 `_proc` 等私有接口；升级必须同时检查这些接口并重跑契约测试。官方源码未修改，也未复制成独立实现。
 - 官方 SDK 不提供 CloudCLI 的多用户 Web 登录、SQLite 持久队列、跨浏览器恢复或队列编辑。它们仍属于本地产品逻辑。
 
-因此，当前最值得推进的是固定版本的官方 Python SDK 辅助进程验证。直接把 Rust TUI 大段翻译成 TypeScript 会生成另一套需要同步上游的实现，维护收益较低。如果不接受 Python/Rust 辅助进程，则保留一个范围明确的 TypeScript 适配层，使用官方生成类型和官方测试作为约束。
+本地启动脚本固定 Python 环境和官方源码提交，拒绝已修改的 SDK 源码。常规启动不拉取网络依赖；安装及验证由 `check-official-codex-client.sh` 单独完成。
 
-## 后续接入边界
+## 历史同步与验收边界
 
-建议的依赖方向：CloudCLI 页面和持久队列 → 很薄的应用适配 → 官方 Python client → 官方 Codex app-server。在独立分支完成 turn、steer、interrupt、流式事件和审批转接后，用相同 fixture 对照现有实现，再进行用户账号下的真实验收。当前两个真实模型超时结果仍保留，模拟模型通过不能替代真实服务验收。
+CloudCLI 既有 watcher 约每 6 秒轮询原生会话文件，发送 `session_upserted`；当前页面在没有本地任务运行时重新加载历史。app-server 模式经 `thread/read` 读取同一份原生历史，不维护导入快照。本次验证了协议和数据读取链路，未完成浏览器、手机和跨网络的完整验收。
+
+原生 Codex 会限制同一 thread 的写入者；某个 app-server 即使一轮已结束，也可能仍持有写锁。跨 CLI/CloudCLI 接续时应先结束任务并释放原客户端（停止或重启对应 app-server），不能把“历史可刷新”理解为“两个客户端可同时控制同一个任务”。本次没有复制、合并或共享会话目录。
+
+真实云端模型验收的结果及待办边界以 [LOCAL_FORK.md](../LOCAL_FORK.md) 为准；本地模拟模型通过不能替代真实服务验收。下一步优先验收最终答复、网页审批及 Android 浏览器，再评估迁移到 3011。
 
 官方源代码采用仓库的 [Apache-2.0 LICENSE](https://github.com/openai/codex/blob/6ff1e1ca3b30fc8b914720681fcf5fe62e95f856/LICENSE)。本次以固定源码依赖运行，未复制修改官方实现；以后确需 vendoring 时保留原许可证、NOTICE、来源提交和改动说明。优先升级依赖，不维护没有来源记录的复制代码。

@@ -33,11 +33,12 @@ uv pip sync --python "$venv/bin/python" "$fixtures/requirements.txt"
 # test home and a loopback model server. They do not use the active ~/.codex home.
 unset OPENAI_API_KEY CODEX_API_KEY OPENAI_BASE_URL
 export CODEX_EXEC_PATH="$codex_executable"
-export PYTHONPATH="$checkout/sdk/python/src"
+export PYTHONPATH="$checkout/sdk/python/src:$checkout/sdk/python/tests"
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 exec "$venv/bin/python" -m pytest --override-ini addopts='' -q \
   "$checkout/sdk/python/tests/test_app_server_turn_controls.py" \
   "$checkout/sdk/python/tests/test_turn_subscriptions.py" \
   "$checkout/sdk/python/tests/test_async_client_behavior.py" \
   "$checkout/sdk/python/tests/test_client_rpc_methods.py" \
-  "$fixtures/test_transport_eof.py"
+  "$fixtures/test_transport_eof.py" \
+  "$fixtures/test_bridge.py"
