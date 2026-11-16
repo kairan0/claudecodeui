@@ -3,8 +3,8 @@ import path from 'node:path';
 import type { WebSocket } from 'ws';
 
 import { queuedMessagesService } from '@/modules/scheduled-messages/index.js';
-import { sessionsDb } from '@/modules/database/index.js';
-import { providerModelsService, sessionsService } from '@/modules/providers/index.js';
+import { sessionsDb, queuedMessagesDb } from '@/modules/database/index.js';
+import { CodexAppServerPreTurnError, providerModelsService, sessionsService } from '@/modules/providers/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients, WS_OPEN_STATE } from '@/modules/websocket/services/websocket-state.service.js';
 import {
@@ -202,6 +202,30 @@ async function handleChatSteer(ws: WebSocket, userId: string | number | null, da
       if (attachments.length !== input.attachments.length) {
         throw new AppError('A queued attachment is outside the upload store.', { code: 'INVALID_ATTACHMENT', statusCode: 400 });
       }
+      if (data.type === 'chat.start-new-turn') {
+        if (dependencies.runtime.activeTurnToken?.('codex', input.sessionId) !== input.activeTurnToken) {
+          throw new AppError('The active turn changed.', { code: 'ACTIVE_TURN_CHANGED', statusCode: 409 });
+        }
+        const queued = queuedMessagesDb.get(authenticatedUser, input.messageId);
+        await new Promise<void>((resolve, reject) => {
+          void runDetachedChatTurn({
+            sessionId: input.sessionId, userId: authenticatedUser, content: input.content,
+            messageId: input.messageId, options: { ...queued?.options, attachments }, interruptActiveRun: true,
+            connection: ws, onAccepted: resolve,
+          }, dependencies).then((result) => {
+            // A fast turn can complete before its start ACK, suppressing the
+            // active-turn UI event. Successful completion also proves delivery.
+            if (result.started && result.error === null) { resolve(); return; }
+            if (!result.started || result.rejectedBeforeStart) reject(new AppError(result.error || 'Unable to start a new turn.', {
+              code: 'NEW_TURN_REJECTED', statusCode: 409,
+            }));
+            // Registration alone does not prove native acceptance. Preserve
+            // uncertain delivery instead of consuming or blindly resending.
+            else reject(new Error(result.error || 'New turn ended without an acceptance event.'));
+          }, reject);
+        });
+        return;
+      }
       await dependencies.runtime.steer('codex', { ...input, attachments });
     });
     sendJson(ws, { kind: 'chat_steer_result', ...result });
@@ -269,7 +293,7 @@ async function dispatchRun(
   dependencies: ChatWebSocketDependencies,
   extraRuntimeOptions: AnyRecord = {},
   beforeRun?: (run: NonNullable<ReturnType<typeof chatRunRegistry.startRun>>) => void | Promise<void>,
-): Promise<{ started: boolean; error: string | null }> {
+): Promise<{ started: boolean; error: string | null; rejectedBeforeStart?: boolean }> {
   const provider = session.provider as LLMProvider;
 
   const run = chatRunRegistry.startRun({
@@ -335,6 +359,7 @@ async function dispatchRun(
   };
 
   let failure: string | null = null;
+  let rejectedBeforeStart = false;
   let markProviderSettled!: () => void;
   providerSettled.set(run, new Promise<void>((resolve) => { markProviderSettled = resolve; }));
   try {
@@ -345,6 +370,7 @@ async function dispatchRun(
     await beforeRun?.(run);
     await dependencies.runtime.run(provider, command, runtimeOptions, run.writer);
   } catch (error) {
+    rejectedBeforeStart = error instanceof CodexAppServerPreTurnError;
     failure = error instanceof Error ? error.message : String(error);
     console.error(`[Chat] Provider runtime "${provider}" failed`, { sessionId, error: failure });
   } finally {
@@ -367,7 +393,7 @@ async function dispatchRun(
       : String(lastError?.content || 'The provider run did not complete successfully.');
   }
 
-  return { started: true, error: failure };
+  return { started: true, error: failure, ...(rejectedBeforeStart ? { rejectedBeforeStart: true } : {}) };
 }
 
 /**
@@ -680,9 +706,12 @@ export async function runDetachedChatTurn(
      * land mid-run, so the timer outranks whatever is running.
      */
     interruptActiveRun?: boolean;
+    /** Interactive replacement caller and native acceptance callback. */
+    connection?: WebSocket;
+    onAccepted?: () => void;
   },
   dependencies: ChatWebSocketDependencies,
-): Promise<{ started: boolean; error: string | null }> {
+): Promise<{ started: boolean; error: string | null; rejectedBeforeStart?: boolean }> {
   const session = sessionsDb.getSessionById(input.sessionId);
   if (!session) {
     return { started: false, error: 'The session no longer exists.' };
@@ -720,7 +749,7 @@ export async function runDetachedChatTurn(
   }
 
   return dispatchRun(
-    null,
+    input.connection ?? null,
     input.userId,
     input.sessionId,
     session,
@@ -728,6 +757,15 @@ export async function runDetachedChatTurn(
     dependencies,
     {},
     input.messageId ? (run) => {
+      if (input.connection) activeRun?.writer.copyConnectionsTo(run.writer);
+      if (input.onAccepted) {
+        const send = run.writer.send.bind(run.writer);
+        run.writer.send = (message: unknown) => {
+          send(message);
+          const event = message as AnyRecord;
+          if (event?.kind === 'status' && event.text === 'active_turn') input.onAccepted?.();
+        };
+      }
       const attachments = filterAttachmentsToUploadStore(input.options?.attachments);
       run.writer.send(createNormalizedMessage({ kind: 'text', role: 'user', provider,
         sessionId: input.sessionId, id: `local_queue_${input.messageId}`, content: input.content,
@@ -761,6 +799,7 @@ export function handleChatConnection(
         case 'chat.edit-send':
           await handleChatEditSend(ws, userId, data, dependencies);
           return;
+        case 'chat.start-new-turn':
         case 'chat.steer':
           await handleChatSteer(ws, userId, data, dependencies);
           return;

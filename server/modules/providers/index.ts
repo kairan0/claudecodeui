@@ -12,3 +12,6 @@ export { sessionsService } from './services/sessions.service.js';
 
 export { initializeSessionsWatcher } from './services/sessions-watcher.service.js';
 export { closeSessionsWatcher } from './services/sessions-watcher.service.js';
+
+// Used by WebSocket delivery to distinguish proven pre-turn rejection from unknown delivery.
+export { CodexAppServerPreTurnError } from './list/codex/codex-app-server.runtime.js';

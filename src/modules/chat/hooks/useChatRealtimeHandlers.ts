@@ -358,8 +358,11 @@ export function useChatRealtimeHandlers({
         }
 
         case 'status': {
-          // Capability metadata is consumed by the queue hook, not shown as task progress.
-          if (msg.text === 'active_turn') return;
+          // Native acceptance also restores activity after an interrupted turn.
+          if (msg.text === 'active_turn') {
+            if (sid) onSessionProcessing?.(sid);
+            return;
+          }
           if (msg.text === 'token_budget' && msg.tokenBudget) {
             // The counter shows the viewed session's context; budgets from
             // other concurrently running sessions must not overwrite it.

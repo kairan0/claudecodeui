@@ -205,7 +205,7 @@ export function useQueuedMessages(
     [refresh],
   );
   const steer = useCallback(
-    (message: QueuedMessage) => {
+    (message: QueuedMessage, startNewTurn = false) => {
       if (
         !turn ||
         turn.sessionId !== message.sessionId ||
@@ -214,7 +214,7 @@ export function useQueuedMessages(
         return;
       const requestId = crypto.randomUUID();
       const frame = {
-        type: 'chat.steer',
+        type: startNewTurn ? 'chat.start-new-turn' : 'chat.steer',
         sessionId: message.sessionId,
         requestId,
         messageId: message.id,

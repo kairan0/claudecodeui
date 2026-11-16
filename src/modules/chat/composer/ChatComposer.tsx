@@ -78,7 +78,7 @@ type ChatComposerProps = {
   editingQueuedMessage: QueuedMessage | null;
   onCancelQueuedEdit: () => void;
   onRemoveUploadedAttachment: (index: number) => void;
-  onSteerQueuedDraft: (message: QueuedMessage) => void;
+  onSteerQueuedDraft: (message: QueuedMessage, startNewTurn?: boolean) => void;
   /** Set while the composer is replacing an already-sent message. */
   isEditingSentMessage: boolean;
   onCancelEditMessage: () => void;
@@ -337,6 +337,8 @@ export default function ChatComposer({
               attachmentCount={message.attachments.length} status={message.status} error={message.error}
               disabled={pendingQueueIds.has(message.id) || message.status === 'dispatching' || message.status === 'steering'}
               onEdit={() => onEditQueuedDraft(message)} onDelete={() => onDeleteQueuedDraft(message)}
+              onStartNewTurn={canSteerQueue && message.status === 'queued' && editingQueuedMessage?.id !== message.id
+                ? () => onSteerQueuedDraft(message, true) : undefined}
               onSteer={canSteerQueue && message.status === 'queued' && editingQueuedMessage?.id !== message.id
                 ? () => onSteerQueuedDraft(message) : undefined} />
           ))}

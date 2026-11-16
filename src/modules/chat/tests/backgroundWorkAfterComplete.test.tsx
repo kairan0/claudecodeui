@@ -23,6 +23,7 @@ const renderHandlers = () => {
   const stored: NormalizedMessage[] = [];
   const log: ActivityLog = [];
   const syncs: string[] = [];
+  const processing: string[] = [];
   // The activity map as the provider would hold it, so the handler's read of
   // "is this session background-only" sees its own earlier report.
   const activityBySession = new Map<string, SessionActivity>();
@@ -43,6 +44,7 @@ const renderHandlers = () => {
     accumulatedStreamRef: { current: '' },
     lastSeqRef: { current: new Map() },
     statusCheckSentAtRef: { current: new Map() },
+    onSessionProcessing: (sessionId) => { if (sessionId) processing.push(sessionId); },
     onSessionIdle: (sessionId) => {
       if (sessionId) {
         activityBySession.delete(sessionId);
@@ -68,7 +70,7 @@ const renderHandlers = () => {
   }));
 
   const dispatch = (event: ServerEvent) => listener?.(event);
-  return { dispatch, log, syncs };
+  return { dispatch, log, syncs, processing };
 };
 
 const event = (fields: Record<string, unknown>): ServerEvent => ({
@@ -202,4 +204,12 @@ test('a rejected steer does not idle the running session', () => {
   dispatch(event({ kind: 'chat_steer_result', requestId: 'steer', messageId: 'queue-item',
     status: 'rejected', error: 'The active turn changed.' }));
   assert.deepEqual(log, []);
+});
+
+test('a replacement active turn restores processing after the interrupted completion', () => {
+  const { dispatch, processing } = renderHandlers();
+  dispatch(event({ kind: 'complete', aborted: true, exitCode: 0 }));
+  assert.deepEqual(processing, []);
+  dispatch(event({ kind: 'status', text: 'active_turn', activeTurnToken: 'replacement' }));
+  assert.deepEqual(processing, ['viewed-session']);
 });
