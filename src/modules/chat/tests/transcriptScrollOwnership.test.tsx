@@ -257,3 +257,18 @@ describe('search jump ownership', () => {
     );
   });
 });
+
+it('follows a final answer replacing the existing streamed row without adding a row', async () => {
+  const messages = new Map<string, NormalizedMessage[]>([
+    [SESSION_A, [buildMessage(1, '2026-01-01T00:00:00.000Z')]],
+  ]);
+  const { result, rerender } = await renderChatSessionState({ session: { id: SESSION_A } as ProjectSession, store: createStore(messages) });
+  const container = createContainer(5000, 500);
+  (result.current.scrollContainerRef as { current: HTMLDivElement | null }).current = container.element;
+  act(() => { rerender({ session: { id: SESSION_A } as ProjectSession }); vi.advanceTimersByTime(200); });
+  container.writes.length = 0;
+  messages.set(SESSION_A, [{ ...messages.get(SESSION_A)![0], content: 'Completed final answer with more content' }]);
+  act(() => { rerender({ session: { id: SESSION_A } as ProjectSession }); });
+  act(() => { vi.advanceTimersByTime(200); });
+  assert.ok(container.writes.length > 0, 'same-row final content should keep the bottom-following viewport current');
+});
