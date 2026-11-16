@@ -460,6 +460,7 @@ test('starts/resumes a thread, submits a turn, and normalizes completed items', 
   assert.equal((tokenStatuses[0]?.tokenBudget as AnyRecord)?.used, 150);
   assert.equal((tokenStatuses[0]?.tokenBudget as AnyRecord)?.total, 200000);
   assert.equal(output.messages.filter((message) => message.kind === 'complete').length, 1);
+  assert.equal(output.messages.filter((message) => message.id === 'codex_turn_summary_turn-1').length, 1);
   assert.equal(output.messages.at(-1)?.success, true);
 });
 

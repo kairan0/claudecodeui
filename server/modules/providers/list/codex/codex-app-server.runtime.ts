@@ -13,6 +13,7 @@ import {
 } from '@/shared/index.js';
 import type {
   AnyRecord,
+  NormalizedMessage,
   ProviderPermissionDecision,
   ProviderRuntimeContext,
   ProviderSteerInput,
@@ -37,6 +38,20 @@ type AppServerRuntimeResult = {
   status: 'completed' | 'interrupted' | 'failed';
   error?: string;
 };
+
+/** Shared by live completion and paginated history to identify the same turn footer. */
+export function createCodexTurnSummary(turn: AnyRecord, sessionId: string): NormalizedMessage | null {
+  if (!turn.id || !['completed', 'interrupted', 'failed'].includes(turn.status)
+    || typeof turn.completedAt !== 'number' || !Number.isFinite(turn.completedAt)) return null;
+  const completed = new Date(turn.completedAt * 1000);
+  if (!Number.isFinite(completed.getTime())) return null;
+  const label = turn.status === 'completed' ? 'Codex · Completed' : turn.status === 'interrupted' ? 'Codex · Interrupted' : 'Codex · Failed';
+  const duration = typeof turn.durationMs === 'number' && Number.isFinite(turn.durationMs) && turn.durationMs >= 0
+    ? ` · Worked for ${Math.floor(turn.durationMs / 60000)}m ${Math.floor(turn.durationMs / 1000) % 60}s` : '';
+  return createNormalizedMessage({ id: `codex_turn_summary_${turn.id}`, sessionId, provider: 'codex',
+    kind: 'task_notification', status: turn.status, timestamp: completed.toISOString(),
+    summary: `${label}${duration} · ${completed.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')}` });
+}
 
 type AppServerRun = {
   appSessionId: string | null;
@@ -966,6 +981,10 @@ export class CodexAppServerRuntime {
         const error = status === 'failed'
           ? readErrorMessage(params)
           : undefined;
+        const turn = readNestedRecord(params, 'turn') ?? {};
+        const footer = createCodexTurnSummary({ ...turn, id: run.turnId, status,
+          completedAt: turn.completedAt ?? Date.now() / 1000 }, run.threadId);
+        if (footer) run.writer.send(footer);
         this.completeRun(run, status, error);
         return;
       }

@@ -29,6 +29,7 @@ import {
 import { readCodexRuntimeMode, resolveCodexRuntimeMode, type CodexRuntimeMode } from './codex-app-server.config.js';
 import {
   codexAppServerRuntime,
+  createCodexTurnSummary,
   transformCodexAppServerItem,
   type CodexAppServerRuntime,
 } from './codex-app-server.runtime.js';
@@ -2653,6 +2654,8 @@ export class CodexSessionsProvider implements IProviderSessions {
           error: { message: typeof error?.message === 'string' ? error.message : 'Turn failed' },
         }, sessionId));
       }
+      const footer = createCodexTurnSummary(turn, sessionId);
+      if (footer) normalized.push(footer);
     }
 
     const result = this.paginateHistory(normalized, paged ? null : limit, paged ? 0 : offset);

@@ -271,3 +271,14 @@ test('cursor history preserves individual item times after steering within a lon
     .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
   assert.equal(merged.at(-1)?.id, 'final-answer');
 });
+
+test('completed turn footer survives history refresh with native duration and completion time', async () => {
+  const provider = new CodexSessionsProvider({ readRuntimeMode: () => 'app-server', appServer: {
+    async readThread() { return { thread: { turns: [{ id: 'done', status: 'completed', itemsView: 'full',
+      startedAt: 1700000000, completedAt: 1700000065, durationMs: 65000,
+      items: [{ type: 'agentMessage', id: 'answer', text: 'Done' }] }] } }; },
+  } });
+  const page = await provider.fetchHistory('app', { providerSessionId: 'native' });
+  assert.equal(page.messages.at(-1)?.id, 'codex_turn_summary_done');
+  assert.match(page.messages.at(-1)?.summary ?? '', /Completed.*Worked for 1m 5s.*UTC/);
+});

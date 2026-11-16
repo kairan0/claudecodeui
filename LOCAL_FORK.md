@@ -1,3 +1,12 @@
+## Codex turn completion footer
+
+Following the official TUI's Worked for [duration] / [completion time] presentation,
+terminal native turns produce a compact transcript footer with status, native
+durationMs when available, and explicit UTC completion time. The stable turn-based
+ID is shared by live events and history so refresh reconciles the same footer.
+Interrupted and failed turns are labeled separately; active turns have no footer.
+91 focused runtime/history tests pass. No cap metric is inferred without defining it.
+
 ## Manager answer ordering after steering
 
 Native paginated history contains per-item startedAtMs/completedAtMs. The adapter
