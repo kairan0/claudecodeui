@@ -1224,6 +1224,7 @@ test('forks a persisted thread through the app-server protocol', async () => {
       threadId: 'thread-source',
       lastTurnId: 'turn-2',
       cwd: directory,
+      excludeTurns: true,
     });
 
     harness.respondWithResult(forkRequest, {

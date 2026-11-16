@@ -780,6 +780,10 @@ export class CodexAppServerRuntime {
         threadId: input.threadId,
         lastTurnId: input.lastTurnId,
         cwd: input.cwd,
+        // Rewind/fork callers only need the new id and transcript path.
+        // Hydrating hundreds of turns can exceed the RPC deadline; omitting
+        // them from the response does not remove history from the fork.
+        excludeTurns: true,
       }));
       const forkedThreadId = readThreadId(result);
       const forkedThread = readNestedRecord(readRecord(result) ?? {}, 'thread');
