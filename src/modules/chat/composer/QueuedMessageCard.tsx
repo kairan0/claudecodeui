@@ -8,6 +8,7 @@ type QueuedMessageCardProps = {
   error?: string | null;
   disabled?: boolean;
   onSteer?: () => void;
+  onStartNewTurn?: () => void;
   attachmentCount?: number;
   onEdit: () => void;
   onDelete: () => void;
@@ -15,7 +16,8 @@ type QueuedMessageCardProps = {
 
 /**
  * Rendered by chat's ChatComposer to show the message queued for a busy
- * session, with edit and delete actions before it is auto-sent.
+ * session (every follow-up queued so far, joined), with edit and delete
+ * actions before it is auto-sent.
  */
 export default function QueuedMessageCard({
   content,
@@ -24,6 +26,7 @@ export default function QueuedMessageCard({
   error,
   disabled = false,
   onSteer,
+  onStartNewTurn,
   attachmentCount = 0,
   onEdit,
   onDelete,
@@ -72,6 +75,13 @@ export default function QueuedMessageCard({
         </div>
 
         <div className="col-start-2 flex items-center justify-end gap-0.5 sm:col-start-3 sm:row-start-1">
+          {onStartNewTurn && (
+            <button type="button" disabled={disabled} onClick={onStartNewTurn}
+              title="Stop the current turn, then send this message as a new turn."
+              className="rounded-md px-2 py-1.5 text-xs font-medium text-primary disabled:opacity-50">
+              Start new turn
+            </button>
+          )}
           {onSteer && (
             <button
               type="button"

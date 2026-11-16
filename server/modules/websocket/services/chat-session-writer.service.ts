@@ -140,6 +140,11 @@ export class ChatSessionWriter {
     this.connections.add(newConnection);
   }
 
+  /** Used by replacement turns to retain the previous run's live audience. */
+  copyConnectionsTo(target: ChatSessionWriter): void {
+    for (const connection of this.connections) target.updateWebSocket(connection);
+  }
+
   setSessionId(sessionId: string): void {
     this.captureProviderSessionId(sessionId);
   }

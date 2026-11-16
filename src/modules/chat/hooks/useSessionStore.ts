@@ -12,6 +12,7 @@ import { useCallback, useMemo, useRef, useState } from 'react';
 import { api } from '@/shared/api';
 import { readUserPreference } from '@/shared/userSettings';
 import type { CodexRuntimeMode, LLMProvider, NormalizedMessage } from '@/shared/types';
+import { sideQuestionStore } from '@/modules/chat/hooks/useSideQuestions';
 import { removeOptimisticUserEchoes } from '@/modules/chat/utils/sessionMessageReconciliation';
 import {
   hasReachedCachedTailTimeBoundary,
@@ -32,6 +33,8 @@ export type SessionStatus = 'idle' | 'loading' | 'streaming' | 'error';
 
 export type SessionSlot = {
   /** Pins history reads to one runtime; changing it requires a fresh persisted cache. */
+  /** Native continuation for older pages; undefined selects offset pagination. */
+  nextCursor?: string | null;
   historyRuntimeMode: CodexRuntimeMode;
   serverMessages: NormalizedMessage[];
   realtimeMessages: NormalizedMessage[];
@@ -80,6 +83,7 @@ function createEmptySlot(): SessionSlot {
 }
 
 type SessionHistoryPage = {
+  nextCursor?: string | null;
   messages: NormalizedMessage[];
   total: number;
   hasMore: boolean;
@@ -110,6 +114,7 @@ async function requestSessionHistoryPage(
 ): Promise<SessionHistoryPage> {
   const response = await api.providers.sessionMessages(sessionId, {
     ...options,
+    ...(runtimeMode === 'app-server' ? { cursor: options.cursor ?? '' } : {}),
     codexRuntimeMode: runtimeMode,
   }, {
     signal: AbortSignal.timeout(SESSION_HISTORY_REQUEST_TIMEOUT_MS),
@@ -120,9 +125,17 @@ async function requestSessionHistoryPage(
   const data = body?.data ?? body;
   const messages: NormalizedMessage[] = Array.isArray(data.messages) ? data.messages : [];
 
+  // The server sends the session's whole side-question list on every page
+  // (not just the page's own rows), so the store is replaced here rather
+  // than merged, regardless of which page this request fetched.
+  if (Array.isArray(data.sideQuestions)) {
+    sideQuestionStore.replaceForSession(sessionId, data.sideQuestions);
+  }
+
   return {
     messages,
-    total: typeof data.total === 'number' ? data.total : messages.length,
+    ...('nextCursor' in data ? { nextCursor: data.nextCursor } : {}),
+    total: data.totalKnown === false ? 0 : typeof data.total === 'number' ? data.total : messages.length,
     hasMore: Boolean(data.hasMore),
     ...(
       data && typeof data === 'object' && 'tokenUsage' in data
@@ -458,7 +471,24 @@ async function refreshLatestSlotFromServer(
 
   // A page with no older rows is the complete authoritative transcript. This
   // also removes cached rows after a provider-side truncation.
-  if (!latestPage.hasMore) {
+  if (latestPage.nextCursor !== undefined) {
+    let window = latestPage.messages;
+    let oldestPage = latestPage;
+    let merge = mergeLatestServerPage(previousServerMessages, window);
+    // Bridge small gaps with native cursors, never a full transcript read.
+    for (let page = 0; previousServerMessages.length > 0 && merge.overlapLength === 0
+      && oldestPage.nextCursor && page < 5; page++) {
+      oldestPage = await requestSessionHistoryPage(sessionId,
+        { limit, cursor: oldestPage.nextCursor }, slot.historyRuntimeMode);
+      if (!canRequest()) return { applied: false, changed: false, deferred: true };
+      window = mergeOlderServerPage(window, oldestPage.messages).messages;
+      merge = mergeLatestServerPage(previousServerMessages, window);
+    }
+    const retainOlder = oldestPage.hasMore && merge.overlapLength > 0 && slot.nextCursor !== undefined;
+    nextServerMessages = retainOlder ? merge.messages : window;
+    nextHasMore = retainOlder ? previousHasMore : oldestPage.hasMore;
+    if (!retainOlder) slot.nextCursor = oldestPage.nextCursor;
+  } else if (!latestPage.hasMore) {
     nextServerMessages = latestPage.messages;
     nextHasMore = false;
   } else if (previousServerMessages.length === 0) {
@@ -645,6 +675,7 @@ export function useSessionStore() {
           notify(sessionId);
           return null;
         }
+        slot.nextCursor = data.nextCursor;
         slot.serverMessages = data.messages;
         slot.total = data.total;
         slot.hasMore = data.hasMore;
@@ -712,10 +743,11 @@ export function useSessionStore() {
           const data = await requestSessionHistoryPage(sessionId, {
             limit: opts.limit ?? SESSION_MESSAGES_PAGE_SIZE,
             offset: slot.offset,
+            ...(slot.nextCursor !== undefined ? { cursor: slot.nextCursor ?? undefined } : {}),
           }, slot.historyRuntimeMode);
           if (!canRequest()) break;
           const olderMerge = mergeOlderServerPage(cachedMessages, data.messages);
-          const shiftedWhileFetching = (
+          const shiftedWhileFetching = data.nextCursor === undefined && (
             data.total !== expectedTotal
             || olderMerge.overlapLength > 0
             || !olderPagePrecedesCachedHistory(data.messages, cachedMessages)
@@ -734,6 +766,7 @@ export function useSessionStore() {
             continue;
           }
 
+          slot.nextCursor = data.nextCursor;
           slot.serverMessages = olderMerge.messages;
           slot.hasMore = data.hasMore;
           slot.total = data.total;
@@ -770,8 +803,11 @@ export function useSessionStore() {
    * just the one that made the edit.
    */
   const truncateAt = useCallback((sessionId: string, anchorId: string) => {
-    const slot = storeRef.current.get(sessionId);
-    if (!slot) return;
+    const previousSlot = storeRef.current.get(sessionId);
+    if (!previousSlot) return;
+    // Replace the slot so in-flight pre-rewind reads fail the identity check.
+    const slot = { ...previousSlot, nextCursor: undefined, fetchedAt: 0, _historyMutationQueue: Promise.resolve() };
+    storeRef.current.set(sessionId, slot);
 
     const cutIndex = slot.serverMessages.findIndex(
       (message) => message.transcriptAnchorId === anchorId,

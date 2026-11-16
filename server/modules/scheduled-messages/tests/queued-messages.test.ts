@@ -59,6 +59,7 @@ function steerBody(message: ReturnType<typeof enqueue>, requestId = 'request') {
 }
 function runtime(run: ProviderRuntimeGateway['run']): ProviderRuntimeGateway {
   return {
+    askSideQuestion: async () => ({ status: 'error' as const, error: 'Unavailable in test', answer: '' }),
     hasRuntime: () => true,
     run: async (...args) => {
       await run(...args);

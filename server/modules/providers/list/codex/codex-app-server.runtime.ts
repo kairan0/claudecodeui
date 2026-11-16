@@ -764,6 +764,22 @@ export class CodexAppServerRuntime {
     });
   }
 
+  /** Reads a bounded page of turns for the provider history adapter. */
+  async listTurns(params: AnyRecord): Promise<unknown> {
+    return this.withAppServerOperation(async () => {
+      await this.manager.start();
+      return this.manager.request('thread/turns/list', params);
+    });
+  }
+
+  /** Reads bounded items, including within exceptionally large turns. */
+  async listItems(params: AnyRecord): Promise<unknown> {
+    return this.withAppServerOperation(async () => {
+      await this.manager.start();
+      return this.manager.request('thread/items/list', params);
+    });
+  }
+
   /** Lists one page of persisted provider threads through the owned process. */
   async listThreads(params: AnyRecord = {}): Promise<unknown> {
     return this.withAppServerOperation(async () => {
@@ -780,6 +796,10 @@ export class CodexAppServerRuntime {
         threadId: input.threadId,
         lastTurnId: input.lastTurnId,
         cwd: input.cwd,
+        // Rewind/fork callers only need the new id and transcript path.
+        // Hydrating hundreds of turns can exceed the RPC deadline; omitting
+        // them from the response does not remove history from the fork.
+        excludeTurns: true,
       }));
       const forkedThreadId = readThreadId(result);
       const forkedThread = readNestedRecord(readRecord(result) ?? {}, 'thread');

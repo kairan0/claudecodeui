@@ -854,6 +854,7 @@ for (const scenario of [
     testContext.mock.method(sessionsDb, 'getSessionByProviderSessionId', () => null);
     testContext.mock.method(notificationChannelEndpointsDb, 'upsertEndpoint', () => endpoint);
     testContext.mock.method(notificationChannelEndpointsDb, 'getEnabledEndpoints', () => [endpoint]);
+    testContext.mock.method(notificationChannelEndpointsDb, 'getEndpoint', () => null);
     testContext.mock.method(notificationChannelEndpointsDb, 'touchEndpoint', () => true);
     testContext.mock.method(notificationPreferencesDb, 'getPreferences', () => {
       if (scenario === 'notification-error') {
@@ -904,7 +905,7 @@ for (const scenario of [
 
     const shouldNotify = ['completed', 'failed', 'pre-turn-failed'].includes(scenario);
     assert.equal(notifications.length, shouldNotify ? 1 : 0);
-    assert.equal(warnings.mock.calls.length, scenario === 'notification-error' ? 1 : 0);
+    assert.equal(warnings.mock.calls.length, scenario === 'notification-error' ? 1 : 0, JSON.stringify(warnings.mock.calls.map(call => call.arguments)));
     if (shouldNotify) {
       const payload = notifications[0]?.payload;
       assert.equal(payload.title, 'My Codex session');
@@ -1224,6 +1225,7 @@ test('forks a persisted thread through the app-server protocol', async () => {
       threadId: 'thread-source',
       lastTurnId: 'turn-2',
       cwd: directory,
+      excludeTurns: true,
     });
 
     harness.respondWithResult(forkRequest, {

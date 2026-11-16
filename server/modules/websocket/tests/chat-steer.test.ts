@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 
 import type { WebSocket } from 'ws';
+import { CodexAppServerPreTurnError } from '@/modules/providers/index.js';
 import {
   closeConnection,
   initializeDatabase,
@@ -29,6 +30,7 @@ async function gateway(
     frames: Record<string, unknown>[];
     userId: number;
     calls: ProviderSteerInput[];
+    runtime: ProviderRuntimeGateway;
   }) => Promise<void>,
 ) {
   const previous = process.env.DATABASE_PATH;
@@ -45,6 +47,7 @@ async function gateway(
   });
   const calls: ProviderSteerInput[] = [];
   const runtime: ProviderRuntimeGateway = {
+    askSideQuestion: async () => ({ status: 'error' as const, error: 'Unavailable in test', answer: '' }),
     hasRuntime: () => true,
     run: async () => {
       throw new Error('Steering must not start a run');
@@ -72,7 +75,7 @@ async function gateway(
     { runtime },
   );
   try {
-    await run({ socket, frames, userId, calls });
+    await run({ socket, frames, userId, calls, runtime });
   } finally {
     connectedClients.delete(socket as unknown as WebSocket);
     chatRunRegistry.clearAll();
@@ -169,3 +172,61 @@ test('subscribe restores the accepted active turn token and malformed steer gets
     assert.equal(frames.at(-1)?.requestId, 'bad');
     assert.equal(chatRunRegistry.getRun('session')?.status, 'running');
   }));
+
+for (const mode of ['success', 'stale', 'abort-failed'] as const) {
+  test(`start new turn: ${mode}`, async () => gateway(async ({ socket, frames, userId, runtime }) => {
+    const events: string[] = [];
+    runtime.abort = async () => { events.push('abort'); return mode !== 'abort-failed'; };
+    runtime.run = async (_provider, command, _options, writer) => { events.push(`run:${command}`); writer.send({ kind: 'status', text: 'active_turn', provider: 'codex', sessionId: 'session', id: 'accepted', timestamp: new Date().toISOString() }); };
+    const entry = queuedMessagesService.enqueue(userId, { id: 'new', sessionId: 'session', content: 'replacement' });
+    const request = { type: 'chat.start-new-turn', sessionId: 'session', requestId: 'replacement-op',
+      messageId: entry.id, revision: entry.revision, activeTurnToken: mode === 'stale' ? 'old' : 'turn-A' };
+    socket.emit('message', JSON.stringify(request));
+    await flush();
+    assert.deepEqual(events, mode === 'success' ? ['abort', 'run:replacement'] : mode === 'stale' ? [] : ['abort']);
+    const result = frames.find((frame) => frame.kind === 'chat_steer_result');
+    assert.equal(result?.status, mode === 'success' ? 'accepted' : 'rejected');
+    if (mode === 'success') {
+      socket.emit('message', JSON.stringify(request)); await flush();
+      assert.deepEqual(events, ['abort', 'run:replacement']);
+      assert.equal(queuedMessagesDb.list(userId, 'session').length, 0);
+    } else {
+      assert.equal(queuedMessagesDb.list(userId, 'session')[0]?.status, 'queued');
+    }
+  }));
+}
+
+test('replacement acceptance releases the queue and streams before completion; pre-turn rejection retains input', async () => {
+  for (const fails of [false, true]) await gateway(async ({socket, frames, userId, runtime}) => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    runtime.run = async (_provider, _command, _options, writer) => {
+      if (fails) throw new CodexAppServerPreTurnError('Rejected before start');
+      writer.send({kind: 'status', text: 'active_turn', provider: 'codex', sessionId: 'session', id: 'accept', timestamp: new Date().toISOString()});
+      writer.send({kind: 'text', content: 'NEW_RESPONSE', provider: 'codex', sessionId: 'session', id: 'text', timestamp: new Date().toISOString()});
+      await held;
+    };
+    const entry = queuedMessagesService.enqueue(userId, {id: 'replacement', sessionId: 'session', content: 'Next'});
+    socket.emit('message', JSON.stringify({type: 'chat.start-new-turn', sessionId: 'session', requestId: 'replace', messageId: entry.id, revision: entry.revision, activeTurnToken: 'turn-A'}));
+    try {
+      await flush();
+      assert.equal(frames.find((frame) => frame.kind === 'chat_steer_result')?.status, fails ? 'rejected' : 'accepted');
+      if (!fails) {
+        assert.ok(frames.some((frame) => frame.content === 'NEW_RESPONSE'));
+        assert.equal(chatRunRegistry.getRun('session')?.status, 'running');
+        assert.equal(queuedMessagesDb.list(userId, 'session').length, 0);
+      } else assert.equal(queuedMessagesDb.list(userId, 'session')[0]?.status, 'queued');
+    } finally { release(); await flush(); }
+  });
+});
+
+test('successful completion before active-turn metadata still confirms delivery', async () => gateway(async ({socket, frames, userId, runtime}) => {
+  runtime.run = async (_provider, _command, _options, writer) => {
+    writer.send({kind: 'complete', exitCode: 0, provider: 'codex', sessionId: 'session', id: 'fast-complete', timestamp: new Date().toISOString()});
+  };
+  const entry = queuedMessagesService.enqueue(userId, {id: 'fast', sessionId: 'session', content: 'Quick'});
+  socket.emit('message', JSON.stringify({type: 'chat.start-new-turn', sessionId: 'session', requestId: 'fast-op', messageId: entry.id, revision: entry.revision, activeTurnToken: 'turn-A'}));
+  await flush();
+  assert.equal(frames.find((frame) => frame.kind === 'chat_steer_result')?.status, 'accepted');
+  assert.equal(queuedMessagesDb.list(userId, 'session').length, 0);
+}));
