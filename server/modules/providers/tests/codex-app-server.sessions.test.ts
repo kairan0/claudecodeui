@@ -210,3 +210,40 @@ test('cursor history bounds items within a turn without full hydration', async (
   assert.deepEqual(calls, [{ threadId: 'native', turnId: 'turn', cursor: 'older-item', limit: 2, sortDirection: 'desc' }]);
   await assert.rejects(provider.fetchHistory('app', { providerSessionId: 'other', cursor: page.nextCursor! }), /cursor/);
 });
+
+test('initial cursor history fills across a short latest turn so recent steering remains visible', async () => {
+  const provider = new CodexSessionsProvider({
+    readRuntimeMode: () => 'app-server',
+    appServer: {
+      async readThread() { throw new Error('Full history must not be loaded'); },
+      async listTurns(params) {
+        return params.cursor
+          ? { data: [{ id: 'previous', itemsView: 'summary' }], nextCursor: null }
+          : { data: [{ id: 'latest', itemsView: 'summary' }], nextCursor: 'previous' };
+      },
+      async listItems(params) {
+        return { data: [{ item: { type: 'userMessage', id: params.turnId,
+          content: [{ type: 'text', text: params.turnId === 'previous' ? 'Recent steering instruction' : 'Next question' }] } }], nextCursor: null };
+      },
+    },
+  });
+  const page = await provider.fetchHistory('app', { providerSessionId: 'native', cursor: '', limit: 50 });
+  assert.deepEqual(page.messages.map(message => message.content), ['Recent steering instruction', 'Next question']);
+  assert.equal(page.hasMore, false);
+});
+
+test('initial history fill remains bounded when many turns have no visible items', async () => {
+  let reads = 0;
+  const provider = new CodexSessionsProvider({
+    readRuntimeMode: () => 'app-server',
+    appServer: {
+      async readThread() { throw new Error('Full history must not be loaded'); },
+      async listTurns() { reads += 1; return { data: [{ id: `turn-${reads}` }], nextCursor: `cursor-${reads}` }; },
+      async listItems() { return { data: [], nextCursor: null }; },
+    },
+  });
+  const page = await provider.fetchHistory('app', { providerSessionId: 'native', cursor: '', limit: 50 });
+  assert.equal(reads, 5);
+  assert.equal(page.hasMore, true);
+  assert.ok(page.nextCursor);
+});

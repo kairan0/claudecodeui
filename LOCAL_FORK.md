@@ -1,3 +1,52 @@
+## 2026-11-17 integrated patch validation
+
+The pending recovery, HTTP UUID, Auto review and history visibility changes are
+now collected for publication. Backend full run: 1192 tests, 1187 passed, 4 skipped,
+1 test-file IPC failure; that file passed all 13 tests in isolation. Frontend full
+run: 1185 tests, 1184 passed, 1 auth refresh timing failure; its file passed all 5
+tests in isolation. Typecheck, build and lint passed (existing warnings).
+
+Immediate-vs-ordinary Steer remains unimplemented. Native 0.166 core constructs
+StepContext.preempt from Feature::InstantInterrupt at step creation; turn/steer
+has no per-request override. Providing two genuine actions needs a native protocol
+and core patch, not relabeling Stop or Start new turn.
+
+## 2026-11-17 steering visibility follow-up
+
+A recent persisted steering item was located on native page 6 at 20 items/page.
+Cursor pagination reports an unknown total (frontend sentinel 0), which wrongly
+hid the entire older-history hint. The hint now remains visible and a Load earlier
+button calls the existing cursor fetch/scroll-restoration path. This fixes access
+to older history without resending messages or changing the provider transcript.
+11 focused frontend tests passed. Backend changes still require a safe restart.
+
+## 2026-11-17 history refresh investigation
+
+Recent consumed steering messages were found in native response_item and typed
+UserMessage records, and the native items API and normalizer retained them.
+Initial cursor reads previously returned only one turn, even if it was short.
+They now fill across up to five native pages toward the requested item count.
+89 related runtime/history tests passed; typecheck and server build passed.
+A live read of the latest 50 items still excluded the older steering item after
+further activity, so the exact user-reported disappearance is not yet established
+as fixed. Await the affected text/cursor position. No service restart was performed.
+
+## 2026-11-17 pending runtime update
+
+Codex Auto review is implemented in the composer and settings, using workspace-write,
+on-request, and approvalsReviewer=auto_review. Other presets explicitly restore
+approvalsReviewer=user on thread start/resume and turn start. Legacy SDK mode rejects
+auto review instead of silently using another policy. The backend build is ready;
+the running service has not been restarted for this change.
+
+Validation: 80 runtime/capability tests, 1183 frontend tests, an additional menu test
+(10 tests in its file), typecheck, build and lint passed (existing warnings).
+
+The requested second Steer action means immediate interruption while staying in the
+same turn. It is NOT Stop or Start new turn. Generated 0.166/0.169 protocol schemas
+expose no per-request interruption option on turn/steer or turn/settings/update.
+Do not advertise two distinct steering actions until a real native mechanism exists.
+
 # 1.37.9 upstream integration status
 
 The maintained GitHub branch is `kairan0/claudecodeui:codex-enhancements`.
@@ -8,9 +57,17 @@ Side questions and context clearing retain upstream provider capability gates.
 The old single-slot queue write endpoint returns 409 rather than accepting work
 that the FIFO scheduler will not dispatch. Existing legacy records are not deleted.
 
-This update is source-only: the production service on port 3011 is not replaced.
+The production service on port 3011 now runs this fork via
+`../cloudcli-trial/start-fork.sh`, retaining the existing CloudCLI database.
+The 2026-11-16 deployment was interrupted after unloading its own host;
+an independent session restored the LaunchAgent and added missing factory
+bindings for `listTurns` / `listItems`. The fix passed 85 runtime/history tests,
+typecheck, build and lint (existing warnings). A read-only probe through the
+built provider and official bridge read two pages of the original long thread
+in approximately 781 ms and 3 ms. This does not verify new model inference.
 The sections below retain historical investigation notes; earlier statements about
-missing GitHub publication or an unfinished 1.37.9 integration are superseded here.
+missing GitHub publication, an unfinished 1.37.9 integration or the unchanged
+1.37.8 deployment are superseded here. Recovery changes remain local.
 
 # CloudCLI Codex steer 本地试验分支
 

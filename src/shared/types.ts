@@ -1500,7 +1500,7 @@ export type AgentProvider = LLMProvider;
 export type AgentCategory = 'account' | 'permissions' | 'mcp' | 'skills';
 
 /** How much Codex may do without asking, from prompting on every edit to bypassing permission checks entirely; persisted as the Codex agent's permission setting. */
-export type CodexPermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions';
+export type CodexPermissionMode = 'default' | 'auto' | 'acceptEdits' | 'bypassPermissions';
 
 /** Selects whether Codex conversations use the persistent app-server protocol or the direct SDK adapter. */
 export type CodexRuntimeMode = 'app-server' | 'sdk';

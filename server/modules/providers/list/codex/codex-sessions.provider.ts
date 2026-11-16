@@ -2529,7 +2529,34 @@ export class CodexSessionsProvider implements IProviderSessions {
     };
   }
 
+  /** Fill the initial window across short turns while retaining bounded native reads. */
   private async fetchAppServerHistory(
+    sessionId: string,
+    providerSessionId: string,
+    limit: number | null,
+    offset: number,
+    cursor?: string,
+  ): Promise<FetchHistoryResult> {
+    let result = await this.fetchAppServerHistoryPage(sessionId, providerSessionId, limit, offset, cursor);
+    if (cursor !== '') return result;
+    const target = Math.min(100, Math.max(1, limit ?? 50));
+    const seen = new Set<string>();
+    // A large conversation must never turn a refresh into a full history read.
+    for (let page = 1; page < 5 && result.messages.length < target && result.nextCursor; page += 1) {
+      const next = result.nextCursor;
+      if (seen.has(next)) throw new Error('History pagination made no progress');
+      seen.add(next);
+      const older = await this.fetchAppServerHistoryPage(
+        sessionId, providerSessionId, target - result.messages.length, 0, next,
+      );
+      const messages = [...older.messages, ...result.messages];
+      result = { ...result, messages, total: messages.length,
+        hasMore: older.hasMore, nextCursor: older.nextCursor };
+    }
+    return result;
+  }
+
+  private async fetchAppServerHistoryPage(
     sessionId: string,
     providerSessionId: string,
     limit: number | null,

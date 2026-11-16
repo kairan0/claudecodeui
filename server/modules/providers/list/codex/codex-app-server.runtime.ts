@@ -148,16 +148,19 @@ const readErrorMessage = (value: unknown, fallback = 'Codex turn failed'): strin
 function mapPermissionMode(permissionMode: unknown): {
   sandbox: 'workspace-write' | 'danger-full-access';
   approvalPolicy: 'never' | 'on-request';
+  approvalsReviewer: 'user' | 'auto_review';
 } {
   switch (permissionMode) {
+    case 'auto':
+      return { sandbox: 'workspace-write', approvalPolicy: 'on-request', approvalsReviewer: 'auto_review' };
     case 'acceptEdits':
-      return { sandbox: 'workspace-write', approvalPolicy: 'never' };
+      return { sandbox: 'workspace-write', approvalPolicy: 'never', approvalsReviewer: 'user' };
     case 'bypassPermissions':
-      return { sandbox: 'danger-full-access', approvalPolicy: 'never' };
+      return { sandbox: 'danger-full-access', approvalPolicy: 'never', approvalsReviewer: 'user' };
     case 'default':
     case undefined:
     case null:
-      return { sandbox: 'workspace-write', approvalPolicy: 'on-request' };
+      return { sandbox: 'workspace-write', approvalPolicy: 'on-request', approvalsReviewer: 'user' };
     default:
       throw new Error(`Unsupported Codex permission mode: ${String(permissionMode)}`);
   }
@@ -554,6 +557,7 @@ export class CodexAppServerRuntime {
         ...(resolvedModel ? { model: resolvedModel } : {}),
         sandbox: permission.sandbox,
         approvalPolicy: permission.approvalPolicy,
+        approvalsReviewer: permission.approvalsReviewer,
       } satisfies AnyRecord;
 
       const threadResult = providerSessionId
@@ -588,6 +592,7 @@ export class CodexAppServerRuntime {
         input: buildTurnInput(command, options, workingDirectory),
         cwd: workingDirectory,
         approvalPolicy: permission.approvalPolicy,
+        approvalsReviewer: permission.approvalsReviewer,
         sandboxPolicy: buildTurnSandboxPolicy(permission.sandbox, threadResult),
         ...(resolvedModel ? { model: resolvedModel } : {}),
         ...(resolvedEffort ? { effort: resolvedEffort } : {}),
@@ -1224,6 +1229,8 @@ export function createCodexAppServerRuntime(options: CodexAppServerRuntimeOption
     steer: runtime.steer.bind(runtime),
     restart: runtime.restart.bind(runtime),
     readThread: runtime.readThread.bind(runtime),
+    listTurns: runtime.listTurns.bind(runtime),
+    listItems: runtime.listItems.bind(runtime),
     listThreads: runtime.listThreads.bind(runtime),
     forkThread: runtime.forkThread.bind(runtime),
     setThreadName: runtime.setThreadName.bind(runtime),

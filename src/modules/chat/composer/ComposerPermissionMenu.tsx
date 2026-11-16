@@ -101,7 +101,7 @@ function ComposerPermissionMenu({
   const close = useCallback(() => setIsOpen(false), []);
   const { triggerRef, menuRef, anchor, updateAnchor } = useComposerMenuAnchor(isOpen, close, 22 * 16);
   const modeLabel = (mode: PermissionMode) =>
-    t(`codex.modes.${mode}`, { defaultValue: getAppearance(mode).label || mode });
+    providerLabel === 'Codex' && mode === 'auto' ? 'Auto review' : t(`codex.modes.${mode}`, { defaultValue: getAppearance(mode).label || mode });
   const activeModeLabel = modeLabel(permissionMode);
   // The name is shown only where the composer has room for it, so it never
   // pushes the model menu and the send button onto a second row. Plan mode,

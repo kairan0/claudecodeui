@@ -603,6 +603,17 @@ function CodexPermissions({
           </label>
         </div>
 
+        {runtimeMode === 'app-server' && (
+          <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-4">
+            <input type="radio" name="codexPermissionMode" checked={permissionMode === 'auto'}
+              onChange={() => onPermissionModeChange('auto')} />
+            <div>
+              <div className="font-medium">Auto review</div>
+              <div className="text-sm text-muted-foreground">Codex reviews approval requests automatically while keeping the workspace sandbox. Requests may be denied.</div>
+            </div>
+          </label>
+        )}
+
         <div
           className={`cursor-pointer rounded-lg border p-4 transition-all ${permissionMode === 'acceptEdits'
             ? 'border-green-400 bg-green-50 dark:border-green-600 dark:bg-green-900/20'

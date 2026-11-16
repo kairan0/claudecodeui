@@ -9,7 +9,8 @@ import type { PendingPermissionRequest, PermissionMode,
   ProviderModelActions,
   ProviderModelOption,
   ProviderModelsDefinition } from '@/shared/types';
-import { DEFAULT_EFFORT_VALUE } from '@/shared/constants';
+import { readUserPreference } from '@/shared/userSettings';
+import { DEFAULT_EFFORT_VALUE, PROVIDER_PERMISSION_PREFERENCE_KEYS } from '@/shared/constants';
 import { readSelectedProvider, writeSelectedProvider } from '@/shared/selectedProvider';
 
 const FALLBACK_PROVIDER_EFFORT_VALUES: Partial<Record<LLMProvider, readonly string[]>> = {
@@ -52,7 +53,7 @@ const providerModelStorageKey = (provider: LLMProvider): string => `${provider}-
 const FALLBACK_PERMISSION_MODES: Record<LLMProvider, PermissionMode[]> = {
   claude: ['default', 'auto', 'acceptEdits', 'bypassPermissions', 'plan'],
   cursor: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
-  codex: ['default', 'acceptEdits', 'bypassPermissions'],
+  codex: ['default', 'auto', 'acceptEdits', 'bypassPermissions'],
   opencode: ['default', 'acceptEdits', 'bypassPermissions', 'plan'],
 };
 
@@ -257,10 +258,12 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
 
   const getPermissionModesForProvider = useCallback((targetProvider: LLMProvider): PermissionMode[] => {
     const capabilityModes = providerCapabilities?.[targetProvider]?.permissionModes;
-    if (capabilityModes && capabilityModes.length > 0) {
-      return capabilityModes as PermissionMode[];
-    }
-    return FALLBACK_PERMISSION_MODES[targetProvider] ?? ['default'];
+    const modes = capabilityModes && capabilityModes.length > 0
+      ? capabilityModes as PermissionMode[]
+      : FALLBACK_PERMISSION_MODES[targetProvider] ?? ['default'];
+    const settings = targetProvider === 'codex'
+      ? readUserPreference<{ runtimeMode?: string }>(PROVIDER_PERMISSION_PREFERENCE_KEYS.codex, {}) : null;
+    return settings?.runtimeMode === 'sdk' ? modes.filter((mode) => mode !== 'auto') : modes;
   }, [providerCapabilities]);
 
   const getDefaultPermissionModeForProvider = useCallback((targetProvider: LLMProvider): PermissionMode => {

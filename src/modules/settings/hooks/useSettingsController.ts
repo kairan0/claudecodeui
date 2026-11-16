@@ -67,7 +67,7 @@ const normalizeMainTab = (tab: string): SettingsMainTab => {
 };
 
 const toCodexPermissionMode = (value: unknown): CodexPermissionMode => {
-  if (value === 'acceptEdits' || value === 'bypassPermissions') {
+  if (value === 'auto' || value === 'acceptEdits' || value === 'bypassPermissions') {
     return value;
   }
 

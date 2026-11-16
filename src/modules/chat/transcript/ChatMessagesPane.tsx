@@ -262,9 +262,12 @@ function ChatMessagesPane({
               {totalMessages > 0 && (
                 <span>
                   {t('session.messages.showingOf', { shown: sessionMessagesCount, total: totalMessages })}{' '}
-                  <span className="text-xs">{t('session.messages.scrollToLoad')}</span>
                 </span>
               )}
+              <span className="text-xs">{t('session.messages.scrollToLoad')}</span>{' '}
+              <button type="button" className="text-blue-600 underline dark:text-blue-400" onClick={loadEarlierMessages}>
+                {t('session.messages.loadEarlier')}
+              </button>
             </div>
           )}
 

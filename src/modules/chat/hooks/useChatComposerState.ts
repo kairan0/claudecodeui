@@ -1,3 +1,4 @@
+import { createRequestId } from '@/shared/utils';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChangeEvent,
@@ -127,23 +128,6 @@ type SubmitOptions = {
 
 const createFakeSubmitEvent = () => {
   return { preventDefault: () => undefined } as unknown as FormEvent<HTMLFormElement>;
-};
-
-/**
- * A v4 UUID for a steered message. The id becomes the message's transcript
- * uuid, so it must be a real one. `crypto.randomUUID` only exists in secure
- * contexts, and the app is often opened over plain http on a LAN address
- * (a phone on the same network), so this falls back to `getRandomValues`.
- */
-const createSteerMessageId = (): string => {
-  if (typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID();
-  }
-  const bytes = crypto.getRandomValues(new Uint8Array(16));
-  bytes[6] = (bytes[6] & 0x0f) | 0x40;
-  bytes[8] = (bytes[8] & 0x3f) | 0x80;
-  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
-  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 };
 
 /** Whether a live user message is the echo of the steered message with this id. */
@@ -923,7 +907,7 @@ export function useChatComposerState({
   // agent reads it. Attachments must already be uploaded.
   const steerIntoRunningTurn = useCallback(
     (message: { content: string; attachments: File[]; uploadedAttachments: unknown[] }, steerSessionKey: string) => {
-      const messageId = createSteerMessageId();
+      const messageId = createRequestId();
       updatePendingSteers((current) => [...current, {
         messageId,
         sessionKey: steerSessionKey,

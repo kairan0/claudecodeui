@@ -1,3 +1,4 @@
+import { createRequestId } from '@/shared/utils';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { api } from '@/shared/api';
@@ -157,7 +158,7 @@ export function useQueuedMessages(
       if (!sessionId)
         throw new Error('Open a session before queueing a message.');
       const fingerprint = JSON.stringify({ sessionId, ...input });
-      const id = enqueueTickets.current.get(fingerprint) ?? crypto.randomUUID();
+      const id = enqueueTickets.current.get(fingerprint) ?? createRequestId();
       enqueueTickets.current.set(fingerprint, id);
       const item = await responseData(
         await api.queuedMessages.create({ ...input, sessionId, id }),
@@ -212,7 +213,7 @@ export function useQueuedMessages(
         actionLocks.current.has(message.id)
       )
         return;
-      const requestId = crypto.randomUUID();
+      const requestId = createRequestId();
       const frame = {
         type: startNewTurn ? 'chat.start-new-turn' : 'chat.steer',
         sessionId: message.sessionId,

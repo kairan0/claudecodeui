@@ -21,6 +21,7 @@ import {
   type CodexAppServerProcess,
 } from '@/modules/providers/list/codex/index.js';
 import { createNormalizedMessage } from '@/shared/index.js';
+import { CodexSessionsProvider } from '@/modules/providers/list/codex/codex-sessions.provider.js';
 import type {
   AnyRecord,
   NormalizedMessage,
@@ -291,6 +292,42 @@ test('uses the owned app-server process for thread list, read, and name requests
   assert.deepEqual(nameRequest.params, { threadId: 'thread-history', name: 'New title' });
   harness.respondWithResult(nameRequest, {});
   await namePromise;
+});
+
+test('factory runtime supports cursor history through the session provider', { timeout: 2_000 }, async (t) => {
+  const harness = createHarness();
+  const runtime = createRuntime(harness.process);
+  t.after(() => harness.process.kill());
+  const provider = new CodexSessionsProvider({
+    appServer: runtime,
+    readRuntimeMode: () => 'app-server',
+  });
+  const history = provider.fetchHistory('app-history', {
+    providerSessionId: 'thread-history', cursor: '', limit: 2,
+  });
+  assert.equal((await harness.nextRequest()).method, 'initialize');
+  assert.equal((await harness.nextRequest()).method, 'initialized');
+  const turns = await harness.nextRequest();
+  assert.equal(turns.method, 'thread/turns/list');
+  assert.deepEqual(turns.params, {
+    threadId: 'thread-history', limit: 1, sortDirection: 'desc', itemsView: 'summary',
+  });
+  harness.respondWithResult(turns, {
+    data: [{ id: 'turn-history', status: 'completed' }], nextCursor: null,
+  });
+  const items = await harness.nextRequest();
+  assert.equal(items.method, 'thread/items/list');
+  assert.deepEqual(items.params, {
+    threadId: 'thread-history', turnId: 'turn-history', limit: 2, sortDirection: 'desc',
+  });
+  harness.respondWithResult(items, {
+    data: [{ item: { type: 'agentMessage', id: 'answer', text: 'Recovered history' } }],
+    nextCursor: null,
+  });
+  const page = await history;
+  assert.deepEqual(page.messages.map((message) => message.content), ['Recovered history']);
+  assert.equal(page.nextCursor, null);
+  assert.equal(page.hasMore, false);
 });
 
 test('starts/resumes a thread, submits a turn, and normalizes completed items', async () => {
@@ -1023,7 +1060,7 @@ for (const failSetup of [false, true]) {
 }
 
 for (const sessionId of ['new-app', 'resume-app']) {
-  for (const permissionMode of ['default', undefined, null, 'acceptEdits', 'bypassPermissions']) {
+  for (const permissionMode of ['default', undefined, null, 'auto', 'acceptEdits', 'bypassPermissions']) {
     test(`maps ${String(permissionMode)} approval policy consistently for ${sessionId}`, async () => {
       const harness = createHarness();
       const runtime = createRuntime(harness.process);
@@ -1034,9 +1071,11 @@ for (const sessionId of ['new-app', 'resume-app']) {
       assert.equal(threadRequest.method, sessionId === 'resume-app' ? 'thread/resume' : 'thread/start');
       assert.equal((threadRequest.params as AnyRecord).approvalPolicy,
         permissionMode === 'acceptEdits' || permissionMode === 'bypassPermissions' ? 'never' : 'on-request');
+      assert.equal((threadRequest.params as AnyRecord).approvalsReviewer, permissionMode === 'auto' ? 'auto_review' : 'user');
       assert.equal((threadRequest.params as AnyRecord).sandbox,
         permissionMode === 'bypassPermissions' ? 'danger-full-access' : 'workspace-write');
-      await harness.nextRequest();
+      const turnRequest = await harness.nextRequest();
+      assert.equal((turnRequest.params as AnyRecord).approvalsReviewer, permissionMode === 'auto' ? 'auto_review' : 'user');
       harness.notify('turn/completed', {
         threadId: sessionId === 'resume-app' ? 'thread-existing' : 'thread-new',
         turnId: 'turn-1', turn: { id: 'turn-1', status: 'completed' },

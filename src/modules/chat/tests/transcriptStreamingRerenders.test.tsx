@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 
 import { createRef } from 'react';
-import { render } from '@testing-library/react';
+import { fireEvent, render } from '@testing-library/react';
 import { test, vi } from 'vitest';
 
 import ChatMessagesPane from '@/modules/chat/transcript/ChatMessagesPane';
@@ -80,7 +80,7 @@ function paneProps(chatMessages: ChatMessage[]) {
     isLoadingSessionMessages: false,
     chatMessages,
     currentSessionId: 'session-1',
-    provider: 'claude',
+    provider: 'claude' as const,
     setProvider: noop,
     setProviderModel: noop,
     providerModelsLoading: false,
@@ -143,4 +143,16 @@ test('a stream tick re-renders the growing row, not the collapsed tool groups ab
     [1, 1, 1],
     `only the streaming row may re-render per flush; got ${JSON.stringify(perFlush)}`,
   );
+});
+
+ test('cursor history offers older messages even when the total is unknown', () => {
+  const load = vi.fn();
+  // Reuse the partial rendering fixture used by the streaming test above.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const view = render(<UiPreferencesProvider><ChatMessagesPane {...(paneProps(buildHistory().slice(0, 1)) as any)}
+    hasMoreMessages totalMessages={0} allMessagesLoaded={false} loadEarlierMessages={load} /></UiPreferencesProvider>);
+  const button = view.getByRole('button', { name: /load earlier|session.messages.loadEarlier/i });
+  fireEvent.click(button);
+  assert.equal(load.mock.calls.length, 1);
+  view.unmount();
 });

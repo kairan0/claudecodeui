@@ -264,3 +264,10 @@ test('the menu ends by saying Tab in the message box switches modes', () => {
 
   assert.equal(getByRole('menu').lastElementChild?.textContent, 'Press Tab in the message box to switch modes');
 });
+
+test('Codex names its automatic approval reviewer explicitly', () => {
+  const { getByRole, unmount } = render(<ComposerPermissionMenu permissionMode="auto"
+    permissionModes={['default', 'auto']} onSelectPermissionMode={() => {}} providerLabel="Codex" />);
+  assert.match(getByRole('button').textContent ?? '', /Auto review/);
+  unmount();
+});

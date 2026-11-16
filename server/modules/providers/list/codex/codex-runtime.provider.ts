@@ -543,6 +543,7 @@ async function queryCodex(
 ) {
   const mode = resolveCodexRuntimeMode(options.codexRuntimeMode);
   if (mode === 'sdk') {
+    if (options.permissionMode === 'auto') throw new Error('Codex Auto review requires the app-server runtime.');
     return queryLegacyCodex(command, options, ws, context);
   }
 

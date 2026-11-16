@@ -1140,8 +1140,12 @@ export function useChatSessionState({
   }, [sessionStore, t]);
 
   const loadEarlierMessages = useCallback(() => {
+    if (hasMoreMessages && scrollContainerRef.current) {
+      void loadOlderMessages(scrollContainerRef.current);
+      return;
+    }
     setVisibleMessageCount((prev) => prev + 100);
-  }, []);
+  }, [hasMoreMessages, loadOlderMessages]);
 
   // Brings one row into view even when it is outside the visible window or
   // sits in a lazy row that has not mounted: widen the window to include it,
