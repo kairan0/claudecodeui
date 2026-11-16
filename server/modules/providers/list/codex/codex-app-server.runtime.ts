@@ -66,6 +66,7 @@ type AppServerRun = {
   abortRequested: boolean;
   terminal: boolean;
   releaseSubscription: boolean;
+  reasoningSummaries: Map<string, Map<number, string>>;
   lastError: string | null;
   completion: Promise<AppServerRuntimeResult>;
   resolveCompletion: (result: AppServerRuntimeResult) => void;
@@ -609,6 +610,7 @@ export class CodexAppServerRuntime {
       const turnParams = {
         threadId,
         input: buildTurnInput(command, options, workingDirectory),
+        summary: 'auto',
         cwd: workingDirectory,
         approvalPolicy: permission.approvalPolicy,
         approvalsReviewer: permission.approvalsReviewer,
@@ -893,6 +895,7 @@ export class CodexAppServerRuntime {
       abortRequested: false,
       terminal: false,
       releaseSubscription: false,
+      reasoningSummaries: new Map(),
       lastError: null,
       completion,
       resolveCompletion,
@@ -955,8 +958,24 @@ export class CodexAppServerRuntime {
     switch (notification.method) {
       case 'turn/started':
         return;
+      case 'item/reasoning/summaryTextDelta': {
+        const itemId = readString(params.itemId);
+        if (!itemId || typeof params.delta !== 'string' || !Number.isInteger(params.summaryIndex) || params.summaryIndex < 0) return;
+        const parts = run.reasoningSummaries.get(itemId) ?? new Map<number, string>();
+        parts.set(params.summaryIndex, (parts.get(params.summaryIndex) ?? '') + params.delta);
+        run.reasoningSummaries.set(itemId, parts);
+        this.emitNormalized(run, transformCodexAppServerItem({ type: 'reasoning', id: itemId,
+          summary: [...parts.entries()].sort(([a], [b]) => a - b).map(([, text]) => text) }));
+        return;
+      }
       case 'item/completed': {
         const item = readNestedRecord(params, 'item');
+        if (item?.type === 'reasoning') {
+          const parts = run.reasoningSummaries.get(item.id);
+          if (!readText(item.summary) && parts) item.summary = [...parts.entries()].sort(([a], [b]) => a - b).map(([, text]) => text);
+          run.reasoningSummaries.delete(item.id);
+          if (!readText(item.summary) && !readText(item.content)) return;
+        }
         if (item && item.type !== 'userMessage' && item.type !== 'hookPrompt') {
           this.emitNormalized(run, transformCodexAppServerItem(item));
         }

@@ -1351,3 +1351,28 @@ test('explicit steer rejection leaves the original turn running', async () => {
   assert.equal(output.messages.filter((item) => item.kind === 'complete').length, 0);
   harness.notify('turn/completed', { threadId: 'thread-existing', turn: { id: 'turn-1', status: 'completed' } }); await run;
 });
+
+test('requests public reasoning summaries and streams them before item completion', async () => {
+  const harness = createHarness();
+  const runtime = createRuntime(harness.process);
+  const output = createWriter();
+  const sessions = new CodexSessionsProvider();
+  const run = runtime.run('Explain', { sessionId: 'reasoning-app' }, output.writer, {
+    ...context, normalizeMessage: (raw, sid) => sessions.normalizeMessage(raw, sid),
+  });
+  await harness.nextRequest(); await harness.nextRequest(); await harness.nextRequest();
+  const turn = await harness.nextRequest();
+  const requestedSummary = (turn.params as AnyRecord).summary;
+  const params = { threadId: 'thread-new', turnId: 'turn-1', itemId: 'reasoning-1', summaryIndex: 0 };
+  harness.notify('item/reasoning/summaryTextDelta', { ...params, delta: 'Checking ' });
+  harness.notify('item/reasoning/summaryTextDelta', { ...params, delta: 'the evidence.' });
+  await new Promise(resolve => setImmediate(resolve));
+  const streamed = output.messages.filter(m => m.kind === 'thinking');
+  harness.notify('item/completed', { threadId: 'thread-new', turnId: 'turn-1',
+    item: { id: 'reasoning-1', type: 'reasoning', summary: ['Checking the evidence.'], content: [] } });
+  harness.notify('turn/completed', { threadId: 'thread-new', turnId: 'turn-1', turn: { id: 'turn-1', status: 'completed' } });
+  await run;
+  assert.equal(requestedSummary, 'auto');
+  assert.deepEqual(streamed.map(m => m.content), ['Checking ', 'Checking the evidence.']);
+  assert.ok(output.messages.filter(m => m.kind === 'thinking').every(m => m.id === 'reasoning-1'));
+});

@@ -1,3 +1,14 @@
+## Public Codex reasoning summaries
+
+Turn start now explicitly requests summary=auto. The adapter accumulates native
+item/reasoning/summaryTextDelta events by item and summary index, reusing the
+existing thinking-message renderer and stable item ID. Completed items replace
+that row, with streamed summary fallback when the final item omits text; empty
+reasoning items do not create empty live cards. This displays only model-provided
+public summaries; historical encrypted reasoning without summaries is not decoded
+or reconstructed. 92 focused tests pass, including a previously failing streaming
+summary regression. Live model generation is not part of this verification.
+
 ## Release CloudCLI-owned native subscriptions
 
 CloudCLI now asks the native server to unsubscribe only after it confirms a turn
