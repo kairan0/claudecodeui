@@ -73,6 +73,60 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+test('a steer lost before reaching the server is retried with its original identity', async () => {
+  vi.useFakeTimers();
+  const view = renderHook(() => useQueuedMessages('session', subscribe, send));
+  try {
+    await act(async () => {});
+    act(() => listener({ kind: 'chat_subscribed', sessionId: 'session', activeTurnToken: 'turn-A' }));
+    act(() => view.result.current.steer(item('B')));
+    const original = send.mock.calls[0][0];
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    assert.equal(send.mock.calls.length, 2);
+    assert.deepEqual(send.mock.calls[1][0], original);
+    act(() => listener({ kind: 'chat_steer_result', ...original, status: 'accepted' }));
+    assert.equal(view.result.current.pendingIds.size, 0);
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
+});
+
+test('a persisted steer with a lost ACK settles without resending', async () => {
+  vi.useFakeTimers();
+  const view = renderHook(() => useQueuedMessages('session', subscribe, send));
+  try {
+    await act(async () => {});
+    act(() => listener({ kind: 'chat_subscribed', sessionId: 'session', activeTurnToken: 'turn-A' }));
+    act(() => view.result.current.steer(item('B')));
+    const original = send.mock.calls[0][0];
+    apiMock.operation.mockResolvedValue(ok({ ...original, status: 'accepted' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    assert.equal(send.mock.calls.length, 1);
+    assert.equal(view.result.current.pendingIds.size, 0);
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
+});
+
+test('an unavailable operation lookup never triggers a speculative resend', async () => {
+  vi.useFakeTimers();
+  const view = renderHook(() => useQueuedMessages('session', subscribe, send));
+  try {
+    await act(async () => {});
+    act(() => listener({ kind: 'chat_subscribed', sessionId: 'session', activeTurnToken: 'turn-A' }));
+    act(() => view.result.current.steer(item('B')));
+    apiMock.operation.mockRejectedValue(new Error('offline'));
+    await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
+    assert.equal(send.mock.calls.length, 1);
+    assert.equal(view.result.current.pendingIds.size, 1);
+  } finally {
+    view.unmount();
+    vi.useRealTimers();
+  }
+});
+
 test('queue state survives rejection and duplicate steer clicks send one correlated request', async () => {
   const view = renderHook(() => useQueuedMessages('session', subscribe, send));
   await waitFor(() => assert.equal(view.result.current.queueItems.length, 2));

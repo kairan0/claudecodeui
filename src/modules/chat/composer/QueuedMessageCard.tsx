@@ -46,11 +46,13 @@ export default function QueuedMessageCard({
             </span>
             <span className="normal-case text-muted-foreground/60">
               ·{' '}
-              {status === 'queued'
+              {status === 'failed' || status === 'unknown'
+                ? t('input.queue.needsAttention')
+                : status === 'queued'
                 ? t('input.queue.willSend', {
                     defaultValue: 'Will send when this finishes',
                   })
-                : t('input.queue.needsAttention')}
+                : t(`input.queue.status.${status}`)}
             </span>
           </div>
           <p className="mt-0.5 line-clamp-2 break-words text-sm text-foreground/90">

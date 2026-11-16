@@ -120,6 +120,8 @@
     "send": "傳送",
     "stop": "停止",
     "hintText": {
+      "queue": "本輪結束後傳送",
+      "updateQueued": "更新排隊訊息",
       "ctrlEnter": "Ctrl+Enter 傳送 • Shift+Enter 換行 • Tab 切換模式 • / 斜線指令",
       "enter": "Enter 傳送 • Shift+Enter 換行 • Tab 切換模式 • / 斜線指令"
     },
@@ -128,6 +130,12 @@
     "clearInput": "清空輸入",
     "scrollToBottom": "捲動到底部",
     "queue": {
+      "sendNext": "加入佇列",
+      "update": "更新",
+      "label": "排隊訊息",
+      "willSend": "本輪結束後傳送",
+      "edit": "編輯",
+      "delete": "刪除",
       "steer": "立即引導",
       "list": "訊息佇列",
       "editing": "正在編輯這則排隊訊息",

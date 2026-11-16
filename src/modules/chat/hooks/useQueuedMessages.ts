@@ -42,7 +42,7 @@ export function useQueuedMessages(
   activeSessionRef.current = sessionId;
   const fetchVersion = useRef(0);
   const pending = useRef(
-    new Map<string, { sessionId: string; messageId: string }>(),
+    new Map<string, { sessionId: string; messageId: string; frame: unknown }>(),
   );
   const actionLocks = useRef(new Set<string>());
   // Reuse a creation ticket after a lost HTTP response so manually retrying cannot enqueue twice.
@@ -102,12 +102,17 @@ export function useQueuedMessages(
     if (!sessionId) return;
     const check = async () => {
       await refresh();
-      for (const requestId of pending.current.keys()) {
+      for (const [requestId, operation] of pending.current) {
         try {
           const result = await responseData(
             await api.queuedMessages.operation(requestId),
           );
           if (result) settle({ kind: 'chat_steer_result', ...result });
+          else if (pending.current.has(requestId)) {
+            // A closed socket can drop the first send. Reuse the exact ticket
+            // and turn token: server deduplication prevents a second injection.
+            sendMessage(operation.frame);
+          }
         } catch {
           /* A network failure cannot prove a steer was rejected. Keep it pending. */
         }
@@ -115,7 +120,7 @@ export function useQueuedMessages(
     };
     const timer = window.setInterval(() => void check(), 5_000);
     return () => window.clearInterval(timer);
-  }, [refresh, sessionId, settle]);
+  }, [refresh, sendMessage, sessionId, settle]);
 
   useEffect(
     () =>
@@ -208,22 +213,24 @@ export function useQueuedMessages(
       )
         return;
       const requestId = crypto.randomUUID();
+      const frame = {
+        type: 'chat.steer',
+        sessionId: message.sessionId,
+        requestId,
+        messageId: message.id,
+        revision: message.revision,
+        activeTurnToken: turn.token,
+      };
       pending.current.set(requestId, {
         sessionId: message.sessionId,
         messageId: message.id,
+        frame,
       });
       actionLocks.current.add(message.id);
       setPendingIds((previous) => new Set(previous).add(message.id));
       setFailure(null);
       try {
-        sendMessage({
-          type: 'chat.steer',
-          sessionId: message.sessionId,
-          requestId,
-          messageId: message.id,
-          revision: message.revision,
-          activeTurnToken: turn.token,
-        });
+        sendMessage(frame);
       } catch (error) {
         // Keep the operation pending: the socket may have sent before reporting a failure.
         setFailure({ sessionId: message.sessionId, text: String(error) });
