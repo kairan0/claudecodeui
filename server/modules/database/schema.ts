@@ -274,8 +274,11 @@ CREATE TABLE IF NOT EXISTS queued_messages (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_queue_session_sequence ON queued_messages(session_id, sequence);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_session_claim ON queued_messages(session_id)
+-- One dispatch and one steering RPC may coexist: steering targets the active dispatch.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_session_claim_kind ON queued_messages(session_id, status)
   WHERE status IN ('dispatching','steering');
+-- Upgrade databases created by the original PR without rewriting queue rows.
+DROP INDEX IF EXISTS idx_queue_session_claim;
 CREATE TABLE IF NOT EXISTS queue_steer_operations (
   request_id TEXT PRIMARY KEY,
   user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

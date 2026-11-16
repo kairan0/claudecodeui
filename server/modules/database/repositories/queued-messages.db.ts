@@ -127,7 +127,7 @@ export const queuedMessagesDb = {
           `UPDATE queued_messages SET status = ? WHERE id = ? AND user_id = ?
       AND revision = ? AND status = 'queued'
       AND NOT EXISTS (SELECT 1 FROM queued_messages busy WHERE busy.session_id = ?
-        AND busy.status IN ('dispatching','steering','unknown'))`,
+        AND (busy.status IN ('steering','unknown') OR (? = 'dispatching' AND busy.status = 'dispatching')))`,
         )
         .run(
           kind,
@@ -135,6 +135,7 @@ export const queuedMessagesDb = {
           message.userId,
           message.revision,
           message.sessionId,
+          kind,
         ).changes > 0
     );
   },

@@ -8,7 +8,9 @@ import { closeConnection, initializeDatabase, scheduledMessagesDb, queuedMessage
 import { dispatchDueScheduledMessages, dispatchQueuedMessages } from '@/modules/scheduled-messages/services/scheduled-message-dispatcher.service.js';
 import { queuedMessagesService } from '@/modules/scheduled-messages/services/queued-messages.service.js';
 import { scheduledMessagesService } from '@/modules/scheduled-messages/services/scheduled-messages.service.js';
-import { chatRunRegistry } from '@/modules/websocket/index.js';
+import { chatRunRegistry, runDetachedChatTurn } from '@/modules/websocket/index.js';
+import { createNormalizedMessage, type ProviderRuntimeWriter } from '@/shared/index.js';
+import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 
 const SESSION_ID = 'scheduled-session';
 
@@ -47,11 +49,12 @@ function createRuntime(
   return {
     hasRuntime: () => true,
     hasBackgroundWork,
-    run: async (provider: string, command: string, options: Record<string, unknown>) => {
+    run: async (provider: string, command: string, options: Record<string, unknown>, writer: ProviderRuntimeWriter) => {
       if (behaviour === 'throw') {
         throw new Error('provider exploded');
       }
       runs.push({ provider, command, options });
+      writer.send(createNormalizedMessage({ kind: 'complete', provider: 'claude', exitCode: 0 }));
     },
     abort: async (_provider: string, sessionId: string) => {
       aborts.push(sessionId);
@@ -178,6 +181,41 @@ test('a due message interrupts a run in progress instead of failing', async () =
     assert.equal(runs.length, 1);
     assert.equal(runs[0].command, 'the schedule wins');
     assert.equal(scheduledMessagesDb.listForSession(userId, SESSION_ID)[0].status, 'sent');
+  });
+});
+
+test('scheduled replacement waits until an interrupted provider invocation releases its session', async () => {
+  await withIsolatedDatabase(async () => {
+    const calls: string[] = [];
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let providerActive = false;
+    const gateway: ProviderRuntimeGateway = {
+      hasRuntime: () => true,
+      hasBackgroundWork: () => false,
+      stopBackgroundTask: async () => false,
+      resolveToolApproval: () => {},
+      getPendingApprovalsForSession: () => [],
+      abort: async () => {
+        // app-server acknowledges the interrupt before the old turn completes.
+        setTimeout(release, 20);
+        return true;
+      },
+      run: async (_provider, content, _options, writer) => {
+        assert.equal(providerActive, false, 'replacement must not overlap the old provider invocation');
+        providerActive = true;
+        calls.push(content);
+        if (content === 'old') await held;
+        providerActive = false;
+        writer.send(createNormalizedMessage({ kind: 'complete', provider: 'claude', exitCode: 0, aborted: content === 'old' }));
+      },
+    };
+    const oldRun = runDetachedChatTurn({ sessionId: SESSION_ID, userId: null, content: 'old' }, { runtime: gateway });
+    await new Promise((resolve) => setImmediate(resolve));
+    const replacement = await runDetachedChatTurn({ sessionId: SESSION_ID, userId: null, content: 'replacement', interruptActiveRun: true }, { runtime: gateway });
+    await oldRun;
+    assert.deepEqual(replacement, { started: true, error: null });
+    assert.deepEqual(calls, ['old', 'replacement']);
   });
 });
 

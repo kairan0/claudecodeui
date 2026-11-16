@@ -23,6 +23,27 @@ import type {
 } from '@/shared/types.js';
 import { AppError, createNormalizedMessage, parseIncomingJsonObject } from '@/shared/utils.js';
 
+// A terminal UI event can precede provider cleanup. Scheduled replacement turns
+// must wait for the exact old invocation to release its runtime session.
+const providerSettled = new WeakMap<
+  NonNullable<ReturnType<typeof chatRunRegistry.startRun>>,
+  Promise<void>
+>();
+
+async function waitForProviderSettlement(settled: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      settled,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error('The interrupted provider run did not stop within 30 seconds.')), 30_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Trust boundary for client-supplied image attachments: chat.send options come
  * straight from the browser, and the provider runtimes read the referenced
@@ -314,6 +335,8 @@ async function dispatchRun(
   };
 
   let failure: string | null = null;
+  let markProviderSettled!: () => void;
+  providerSettled.set(run, new Promise<void>((resolve) => { markProviderSettled = resolve; }));
   try {
     // Runs only now that the session is reserved, because an edit rewinds the
     // conversation here and a rewind for a run that was never admitted cannot
@@ -331,6 +354,17 @@ async function dispatchRun(
     // a queued message can start the session's next run before this promise
     // settles, and the session-keyed completeRun would kill that new run.
     chatRunRegistry.completeRunIfCurrent(run, { exitCode: 1 });
+    markProviderSettled();
+  }
+
+  // Codex and other providers often report failure through their terminal
+  // event and resolve normally. A resolved promise alone is not success.
+  const terminal = [...run.events].reverse().find((event) => event.kind === 'complete');
+  if (!failure && (!terminal || terminal.aborted || terminal.exitCode !== 0)) {
+    const lastError = [...run.events].reverse().find((event) => event.kind === 'error');
+    failure = terminal?.aborted
+      ? 'The provider run was interrupted.'
+      : String(lastError?.content || 'The provider run did not complete successfully.');
   }
 
   return { started: true, error: failure };
@@ -669,8 +703,17 @@ export async function runDetachedChatTurn(
     // interrupted run end before this turn's stream begins. The interrupted
     // run's own dispatch settles later through completeRunIfCurrent, which is
     // scoped to that run and cannot touch the one started here.
+    const settled = providerSettled.get(activeRun);
     const aborted = await dependencies.runtime.abort(activeRun.provider, input.sessionId);
-    chatRunRegistry.completeRun(input.sessionId, {
+    if (!aborted) return { started: false, error: 'The active provider run could not be interrupted.' };
+    if (settled) {
+      try {
+        await waitForProviderSettlement(settled);
+      } catch (error) {
+        return { started: false, error: error instanceof Error ? error.message : String(error) };
+      }
+    }
+    chatRunRegistry.completeRunIfCurrent(activeRun, {
       exitCode: aborted ? 0 : 1,
       aborted: true,
     });

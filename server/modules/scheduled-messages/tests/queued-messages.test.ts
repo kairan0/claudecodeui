@@ -6,6 +6,7 @@ import test from 'node:test';
 
 import {
   closeConnection,
+  getConnection,
   initializeDatabase,
   queuedMessagesDb,
   sessionDraftsDb,
@@ -19,7 +20,7 @@ import {
 } from '@/modules/scheduled-messages/index.js';
 import { dispatchQueuedMessages } from '@/modules/scheduled-messages/services/scheduled-message-dispatcher.service.js';
 import { chatRunRegistry } from '@/modules/websocket/index.js';
-import { AppError } from '@/shared/index.js';
+import { AppError, createNormalizedMessage } from '@/shared/index.js';
 import type { ProviderRuntimeGateway } from '@/modules/websocket/index.js';
 
 async function isolated(run: (userId: number) => Promise<void>) {
@@ -59,7 +60,10 @@ function steerBody(message: ReturnType<typeof enqueue>, requestId = 'request') {
 function runtime(run: ProviderRuntimeGateway['run']): ProviderRuntimeGateway {
   return {
     hasRuntime: () => true,
-    run,
+    run: async (...args) => {
+      await run(...args);
+      args[3].send(createNormalizedMessage({ kind: 'complete', provider: args[0], exitCode: 0 }));
+    },
     abort: async () => true,
     stopBackgroundTask: async () => false,
     hasBackgroundWork: () => false,
@@ -174,6 +178,53 @@ test('steering a later item consumes only that item and a repeated request sends
     );
   }));
 
+test('a queue-dispatched turn accepts steering while ordinary dispatch remains blocked', async () =>
+  isolated(async (userId) => {
+    enqueue(userId, 'B');
+    const c = enqueue(userId, 'C');
+    const d = enqueue(userId, 'D');
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const gateway = runtime(async () => { await held; });
+    const dispatch = dispatchQueuedMessages(gateway);
+    try {
+      assert.equal(chatRunRegistry.isProcessing('session'), true);
+      let calls = 0;
+      const result = await queuedMessagesService.steer(userId, steerBody(c), async () => {
+        calls += 1;
+        assert.equal(await dispatchQueuedMessages(gateway), 0);
+        await assert.rejects(queuedMessagesService.steer(userId, steerBody(d, 'concurrent'), async () => {}), /changed/);
+      });
+      assert.equal(result.status, 'accepted');
+      assert.equal(calls, 1);
+      assert.deepEqual(queuedMessagesService.list(userId, 'session').map((item) => item.id), ['B', 'D']);
+      assert.equal(await dispatchQueuedMessages(gateway), 0);
+    } finally {
+      release();
+      await dispatch;
+    }
+    assert.deepEqual(queuedMessagesService.list(userId, 'session').map((item) => item.id), ['D']);
+  }));
+
+test('upgrading the original claim index permits steering without permitting duplicate claims', async () =>
+  isolated(async (userId) => {
+    const b = enqueue(userId, 'B');
+    const c = enqueue(userId, 'C');
+    const d = enqueue(userId, 'D');
+    getConnection().exec(`DROP INDEX idx_queue_session_claim_kind;
+      CREATE UNIQUE INDEX idx_queue_session_claim ON queued_messages(session_id)
+      WHERE status IN ('dispatching','steering');`);
+    assert.equal(queuedMessagesDb.claim(b, 'dispatching'), true);
+    await initializeDatabase();
+    await initializeDatabase();
+    assert.equal(queuedMessagesDb.claim(c, 'steering'), true);
+    assert.equal(queuedMessagesDb.claim(d, 'steering'), false);
+    assert.equal(queuedMessagesDb.claim(d, 'dispatching'), false);
+    queuedMessagesDb.recoverClaims();
+    assert.deepEqual(queuedMessagesService.list(userId, 'session').map((item) => item.status), ['unknown', 'unknown', 'queued']);
+    assert.equal(queuedMessagesDb.claim(d, 'steering'), false);
+  }));
+
 test('a steer reservation excludes dispatch and editing until its correlated result', async () =>
   isolated(async (userId) => {
     const b = enqueue(userId, 'B');
@@ -263,6 +314,23 @@ test('failed normal dispatch preserves the message and pauses the FIFO', async (
     assert.equal(rows[1].status, 'queued');
     assert.equal(await dispatchQueuedMessages(runtime(async () => {})), 0);
   }));
+
+for (const aborted of [false, true]) {
+  test(`a resolved runtime with ${aborted ? 'interrupted' : 'failed'} completion pauses the FIFO`, async () =>
+    isolated(async (userId) => {
+      enqueue(userId, 'B');
+      enqueue(userId, 'C');
+      await dispatchQueuedMessages(runtime(async (_provider, _content, _options, writer) => {
+        writer.send(createNormalizedMessage({ kind: 'complete', provider: 'codex', exitCode: aborted ? 0 : 1, aborted }));
+        return { status: aborted ? 'interrupted' : 'failed' };
+      }));
+      const rows = queuedMessagesService.list(userId, 'session');
+      assert.equal(rows[0].status, 'failed');
+      assert.ok(rows[0].error);
+      assert.equal(rows[1].status, 'queued');
+      assert.equal(await dispatchQueuedMessages(runtime(async () => {})), 0);
+    }));
+}
 
 test('restart marks outstanding claims unknown and never resends them', async () =>
   isolated(async (userId) => {
