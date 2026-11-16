@@ -212,7 +212,8 @@ test('the fork resumes the session read-only with every measured option', { time
   assert.deepEqual(options.tools, ['Read', 'Grep', 'Glob']);
   assert.deepEqual(options.allowedTools, ['Read', 'Grep', 'Glob']);
   assert.equal(options.permissionMode, 'dontAsk');
-  assert.deepEqual(options.settingSources, []);
+  assert.deepEqual(options.settingSources, ['project', 'user', 'local']);
+  assert.deepEqual(options.settings, { disableAllHooks: true });
   assert.equal(options.maxTurns, 4);
   assert.equal(options.includePartialMessages, true);
   assert.equal(options.cwd, '/tmp/side-question-project');

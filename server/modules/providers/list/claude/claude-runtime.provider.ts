@@ -163,7 +163,7 @@ const BG_WAIT_CEILING_MS = 30 * 60 * 1000;
 // bounds a CLI that dropped them, so the session is not left processing.
 const STEER_FOLLOW_UP_GRACE_MS = 30 * 1000;
 
-const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode']);
+const TOOLS_REQUIRING_INTERACTION = new Set(['AskUserQuestion', 'ExitPlanMode', 'exit_plan_mode']);
 
 // An MCP server's request for input travels as a permission request under this
 // name. It is not a tool the model can call: the name routes the request to the
@@ -1503,6 +1503,13 @@ async function queryClaudeSDK(
           if (Array.isArray(sdkOptions.disallowedTools)) {
             sdkOptions.disallowedTools = sdkOptions.disallowedTools.filter((entry: string) => entry !== decision.rememberEntry);
           }
+        }
+        // Approving the plan tool alone does not leave SDK plan permissions.
+        // Restore the launch preset; an explicitly planned run resumes in default mode.
+        if (toolName === 'ExitPlanMode' || toolName === 'exit_plan_mode') {
+          const mode = sdkOptions.permissionMode === 'plan' ? 'default' : sdkOptions.permissionMode ?? 'default';
+          return { behavior: 'allow', updatedInput: decision.updatedInput ?? input,
+            updatedPermissions: [{ type: 'setMode', mode, destination: 'session' }] };
         }
         return { behavior: 'allow', updatedInput: decision.updatedInput ?? input };
       }

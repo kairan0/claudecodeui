@@ -102,11 +102,10 @@ async function runSideQuestionQuery(
     tools: SIDE_QUESTION_TOOLS,
     allowedTools: SIDE_QUESTION_TOOLS,
     permissionMode: 'dontAsk',
-    // settingSources: [] only disables settings files. strictMcpConfig is the
-    // option that actually ignores project .mcp.json, user settings and
-    // plugin MCP config, so the fork cannot start the user's MCP servers
-    // (SDK 0.3.165, checked in node_modules/@anthropic-ai/claude-agent-sdk).
-    settingSources: [],
+    // Match the main query's connection/model settings, including custom API env.
+    // Keep user hooks disabled and MCP isolated on this read-only fork.
+    settingSources: ['project', 'user', 'local'],
+    settings: { disableAllHooks: true },
     strictMcpConfig: true,
     maxTurns: 4,
     includePartialMessages: true,

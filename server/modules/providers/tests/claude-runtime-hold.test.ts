@@ -9,6 +9,7 @@ import { CLAUDE_PREDEFINED_MODELS } from '@/modules/providers/list/claude/claude
 import {
   listClaudeSDKBackgroundWork,
   queryClaudeSDK,
+  resolveToolApproval,
   stopClaudeSDKTask,
 } from '@/modules/providers/list/claude/claude-runtime.provider.js';
 import type { NormalizedMessage, ProviderRuntimeContext } from '@/shared/types.js';
@@ -364,3 +365,27 @@ test('a turn whose tool emits no task events still holds on the static rule', as
     assert.equal(script.released(), false, 'Monitor reports no task, so the launch rule decides');
   });
 });
+
+for (const initialMode of ['default', 'plan', 'acceptEdits']) {
+  test(`approving ExitPlanMode restores an executable session mode from ${initialMode}`, async () => {
+    let approval: unknown;
+    const context: ProviderRuntimeContext = {
+      resolveProviderSessionId: () => null,
+      resolveResumeModel: async () => undefined,
+      getProviderModels: async () => CLAUDE_PREDEFINED_MODELS as never,
+      normalizeMessage: () => [],
+      isProviderInstalled: async () => true,
+      createQuery: ({ options }) => Object.assign((async function* () {
+        approval = await options.canUseTool('ExitPlanMode', { plan: 'Proceed' });
+        yield { type: 'result', subtype: 'success', session_id: 'plan-test' };
+      })(), { interrupt: async () => {} }),
+    };
+    await queryClaudeSDK('plan', { sessionId: 'plan-test', permissionMode: initialMode }, {
+      send: (message: NormalizedMessage) => {
+        if (message.kind === 'permission_request') setImmediate(() => resolveToolApproval(message.requestId!, { allow: true }));
+      },
+    } as never, context);
+    assert.deepEqual(approval, { behavior: 'allow', updatedInput: { plan: 'Proceed' },
+      updatedPermissions: [{ type: 'setMode', mode: initialMode === 'plan' ? 'default' : initialMode, destination: 'session' }] });
+  });
+}

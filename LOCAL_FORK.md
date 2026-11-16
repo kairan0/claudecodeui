@@ -1,3 +1,13 @@
+## Claude plan approval and custom API side questions
+
+Approving ExitPlanMode now returns an SDK session-mode update restoring the
+launch permission preset (explicit plan starts return to default). Previously
+approval allowed the tool but left execution in plan permissions.
+Side questions now read project/user/local settings like main queries, preserving
+custom API configuration, while retaining Read/Grep/Glob-only tools, strict MCP
+isolation, and disabling user hooks. No credentials are copied or persisted.
+35 focused tests passed; live custom API inference has not been tested.
+
 ## 2026-11-17 integrated patch validation
 
 The pending recovery, HTTP UUID, Auto review and history visibility changes are
