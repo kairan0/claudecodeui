@@ -65,6 +65,7 @@ type AppServerRun = {
   turnAccepted: boolean;
   abortRequested: boolean;
   terminal: boolean;
+  releaseSubscription: boolean;
   lastError: string | null;
   completion: Promise<AppServerRuntimeResult>;
   resolveCompletion: (result: AppServerRuntimeResult) => void;
@@ -569,6 +570,7 @@ export class CodexAppServerRuntime {
 
       const threadParams = {
         cwd: workingDirectory,
+        config: { thread_unload_delay_secs: 0 },
         ...(resolvedModel ? { model: resolvedModel } : {}),
         sandbox: permission.sandbox,
         approvalPolicy: permission.approvalPolicy,
@@ -659,6 +661,12 @@ export class CodexAppServerRuntime {
     } finally {
       if (sessionId && this.pendingRunSetups.get(sessionId) === setup) {
         this.pendingRunSetups.delete(sessionId);
+      }
+      // Release only a run that the native server confirmed has ended. Never
+      // evict an uncertain/live turn or another client's subscription.
+      if (run?.releaseSubscription) {
+        try { await this.manager.request('thread/unsubscribe', { threadId: run.threadId }); }
+        catch (error) { console.warn('[Codex app-server] Failed to release completed thread subscription:', error instanceof Error ? error.message : String(error)); }
       }
       this.inFlightRuns -= 1;
       if (run) {
@@ -884,6 +892,7 @@ export class CodexAppServerRuntime {
       turnAccepted: false,
       abortRequested: false,
       terminal: false,
+      releaseSubscription: false,
       lastError: null,
       completion,
       resolveCompletion,
@@ -979,6 +988,7 @@ export class CodexAppServerRuntime {
         return;
       }
       case 'turn/completed': {
+        run.releaseSubscription = true;
         const status = readTurnStatus(params);
         const error = status === 'failed'
           ? readErrorMessage(params)

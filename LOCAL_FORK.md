@@ -1,3 +1,17 @@
+## Release CloudCLI-owned native subscriptions
+
+CloudCLI now asks the native server to unsubscribe only after it confirms a turn
+has ended. Its thread start/resume overrides set thread_unload_delay_secs=0, so
+idle unobserved threads can release writer ownership promptly. The provider run
+settles after this cleanup, preventing a queued replacement from racing the old
+unsubscribe. Uncertain or still-running turns are not evicted. Subscriptions held
+by another client are unaffected; this is not a force-unlock implementation.
+
+91 runtime/history tests, typecheck, server build and lint pass. A native diagnostic
+resumed a disposable historical fork in 0.72s without model inference, unsubscribed,
+and confirmed its ID disappeared from thread/loaded/list while the process remained
+alive. Previously retained subscriptions may require the deployment restart to clear.
+
 ## Metadata-only resume
 
 thread/resume now passes excludeTurns=true, matching fork and the separate

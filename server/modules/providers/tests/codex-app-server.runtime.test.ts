@@ -30,6 +30,7 @@ import type {
 } from '@/shared/index.js';
 
 class FakeAppServerProcess extends EventEmitter {
+  readonly unsubscribed: string[] = [];
   readonly stdin = new PassThrough();
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
@@ -73,6 +74,13 @@ function createHarness(options: {
       }
 
       const request = JSON.parse(line) as Record<string, unknown>;
+      // Cleanup is asserted via the recording below, not mixed with protocol setup requests.
+      if (request.method === 'thread/unsubscribe') {
+        process.unsubscribed.push((request.params as AnyRecord).threadId);
+        process.stdout.write(JSON.stringify({ id: request.id, result: { status: 'unsubscribed' } }) + '\n');
+        newlineIndex = inputBuffer.indexOf('\n');
+        continue;
+      }
       const waiter = waiters.shift();
       if (waiter) {
         waiter(request);
@@ -460,6 +468,7 @@ test('starts/resumes a thread, submits a turn, and normalizes completed items', 
   assert.equal((tokenStatuses[0]?.tokenBudget as AnyRecord)?.used, 150);
   assert.equal((tokenStatuses[0]?.tokenBudget as AnyRecord)?.total, 200000);
   assert.equal(output.messages.filter((message) => message.kind === 'complete').length, 1);
+  assert.deepEqual(harness.process.unsubscribed, ['thread-new']);
   assert.equal(output.messages.filter((message) => message.id === 'codex_turn_summary_turn-1').length, 1);
   assert.equal(output.messages.at(-1)?.success, true);
 });
@@ -570,6 +579,7 @@ for (const sessionId of ['app-new', 'resume-app']) {
       await harness.nextRequest();
       const threadRequest = await harness.nextRequest();
       assert.equal(threadRequest.method, sessionId === 'resume-app' ? 'thread/resume' : 'thread/start');
+      assert.deepEqual((threadRequest.params as AnyRecord).config, { thread_unload_delay_secs: 0 });
       if (sessionId === 'resume-app') assert.equal((threadRequest.params as AnyRecord).excludeTurns, true);
       const turnRequest = await harness.nextRequest();
       assert.equal(turnRequest.method, 'turn/start');
@@ -1071,6 +1081,7 @@ for (const sessionId of ['new-app', 'resume-app']) {
       await harness.nextRequest();
       const threadRequest = await harness.nextRequest();
       assert.equal(threadRequest.method, sessionId === 'resume-app' ? 'thread/resume' : 'thread/start');
+      assert.deepEqual((threadRequest.params as AnyRecord).config, { thread_unload_delay_secs: 0 });
       if (sessionId === 'resume-app') assert.equal((threadRequest.params as AnyRecord).excludeTurns, true);
       assert.equal((threadRequest.params as AnyRecord).approvalPolicy,
         permissionMode === 'acceptEdits' || permissionMode === 'bypassPermissions' ? 'never' : 'on-request');
