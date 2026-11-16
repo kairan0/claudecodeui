@@ -2,6 +2,8 @@
 
 评估日期：2026-11-16。结论：可以维护为隔离实验 fork；目前不建议替换现有 CloudCLI 1.37.8 服务。
 
+同日后续方向已按用户要求调整为**官方客户端复用优先**。已核对官方 Rust/Python 客户端，建立独立验证分支 `local/official-client-reuse`；87 项官方测试及一个 EOF 回归场景共 88 项通过。当前未替换产品运行路径，详见 [官方客户端复用评估](docs/official-client-reuse.md)。下文保留原 PR 的评估与补丁记录。
+
 这个分支针对 [上游 PR #1526](https://github.com/siteboon/claudecodeui/pull/1526) 的 Codex app-server 和消息队列进行修补。它没有实现 AgentsRoom 的 idea 工作区、任务看板或多智能体编排。队列里的“下一条提示词”也不等于通用待办管理。
 
 ## 来源与维护成本
