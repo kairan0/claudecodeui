@@ -1,3 +1,15 @@
+## Metadata-only resume
+
+thread/resume now passes excludeTurns=true, matching fork and the separate
+paginated history path. The reported long conversation resumed in 0.41 seconds
+with zero returned turns during a native diagnostic; no model turn was sent.
+The diagnostic unsubscribed and exited, and no target writer lock remained.
+91 runtime/history tests, typecheck, server build and lint passed.
+
+Ownership caveat: idle subscribed native threads can retain writer ownership.
+Unsubscribe and native idle unload are distinct from completing a model turn.
+This patch does not delete locks or evict threads owned by another client.
+
 ## Codex turn completion footer
 
 Following the official TUI's Worked for [duration] / [completion time] presentation,

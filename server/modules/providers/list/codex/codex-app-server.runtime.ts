@@ -578,6 +578,8 @@ export class CodexAppServerRuntime {
       const threadResult = providerSessionId
         ? await this.manager.request('thread/resume', {
           threadId: providerSessionId,
+          // History is fetched separately through the bounded native paging API.
+          excludeTurns: true,
           ...threadParams,
         })
         : await this.manager.request('thread/start', threadParams);

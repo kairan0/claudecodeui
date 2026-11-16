@@ -570,6 +570,7 @@ for (const sessionId of ['app-new', 'resume-app']) {
       await harness.nextRequest();
       const threadRequest = await harness.nextRequest();
       assert.equal(threadRequest.method, sessionId === 'resume-app' ? 'thread/resume' : 'thread/start');
+      if (sessionId === 'resume-app') assert.equal((threadRequest.params as AnyRecord).excludeTurns, true);
       const turnRequest = await harness.nextRequest();
       assert.equal(turnRequest.method, 'turn/start');
       assert.equal((turnRequest.params as AnyRecord).approvalPolicy, permissionMode === 'default' ? 'on-request' : 'never');
@@ -1070,6 +1071,7 @@ for (const sessionId of ['new-app', 'resume-app']) {
       await harness.nextRequest();
       const threadRequest = await harness.nextRequest();
       assert.equal(threadRequest.method, sessionId === 'resume-app' ? 'thread/resume' : 'thread/start');
+      if (sessionId === 'resume-app') assert.equal((threadRequest.params as AnyRecord).excludeTurns, true);
       assert.equal((threadRequest.params as AnyRecord).approvalPolicy,
         permissionMode === 'acceptEdits' || permissionMode === 'bypassPermissions' ? 'never' : 'on-request');
       assert.equal((threadRequest.params as AnyRecord).approvalsReviewer, permissionMode === 'auto' ? 'auto_review' : 'user');
